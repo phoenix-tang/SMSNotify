@@ -16,7 +16,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 快递功能的数据层：一条取件记录从「收到短信」到「落盘 + 常驻通知」的完整链路。
+ * 快递功能的数据层：一条取件记录从「收到短信」到「落盘 + 通知」的完整链路。
  *
  *     短信（公共的 sms/SmsReceiver）→ [DeliverySmsHandler] → 规则解析 → [Store] 入库 → [NotifyHelper] 刷新通知
  *
@@ -27,7 +27,6 @@ import java.util.Locale
 data class PickupRecord(
     val id: Long,
     val sender: String,
-    val body: String,
     val provider: String,  // 服务商，如 "丰巢"
     val cabinet: String,   // 如 "4号柜"
     val code: String,      // 取件码
@@ -74,12 +73,10 @@ object Store {
                 val arr = JSONArray(file!!.readText())
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
-                    // 旧数据无 provider 字段，从短信正文补解析
-                    val provider = o.optString("provider", "").ifEmpty { PickupParser.providerOf(o.getString("body")) }
                     records.add(
                         PickupRecord(
-                            o.getLong("id"), o.getString("sender"), o.getString("body"),
-                            provider, o.getString("cabinet"), o.getString("code"),
+                            o.getLong("id"), o.getString("sender"),
+                            o.optString("provider", ""), o.getString("cabinet"), o.getString("code"),
                             o.getLong("time"), o.getBoolean("taken")
                         )
                     )
@@ -92,11 +89,11 @@ object Store {
     fun all(): List<PickupRecord> = records.sortedByDescending { it.time }
 
     /** 去重：同一发件号 + 同柜 + 同取件码且未取出的记录不重复添加 */
-    fun add(sender: String, body: String, provider: String, cabinet: String, code: String): Boolean {
+    fun add(sender: String, provider: String, cabinet: String, code: String): Boolean {
         if (records.any { it.sender == sender && it.cabinet == cabinet && it.code == code && !it.taken }) {
             return false
         }
-        records.add(PickupRecord(nextId++, sender, body, provider, cabinet, code, System.currentTimeMillis(), false))
+        records.add(PickupRecord(nextId++, sender, provider, cabinet, code, System.currentTimeMillis(), false))
         changed()
         return true
     }
@@ -123,7 +120,7 @@ object Store {
         records.forEach { r ->
             arr.put(
                 JSONObject()
-                    .put("id", r.id).put("sender", r.sender).put("body", r.body)
+                    .put("id", r.id).put("sender", r.sender)
                     .put("provider", r.provider).put("cabinet", r.cabinet).put("code", r.code)
                     .put("time", r.time).put("taken", r.taken)
             )
@@ -132,7 +129,12 @@ object Store {
     }
 }
 
-/** 常驻通知：只报未取数量，点击进入快递列表 */
+/**
+ * 未取快递通知：**只在有待取快递时出现**，全部取出后自动收回。
+ *
+ * 它不承担保活职责（通知本身也不会让进程免于被冻结），
+ * 空闲时留在通知栏只会制造噪音，所以 pending 为 0 直接 cancel。
+ */
 object NotifyHelper {
     private const val CHANNEL_ID = "deliveries"
     private const val NOTIF_ID = 1001
@@ -141,7 +143,8 @@ object NotifyHelper {
         if (Build.VERSION.SDK_INT >= 26) {
             val ch = NotificationChannel(
                 CHANNEL_ID, "快递取件提醒", NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "常驻显示未取快递" }
+            ).apply { description = "有未取快递时显示" }
+            // 已存在的渠道也会被更新名称/描述（重要性与声音不可改，这里只改文案）
             ctx.getSystemService(NotificationManager::class.java)
                 .createNotificationChannel(ch)
         }
@@ -149,7 +152,14 @@ object NotifyHelper {
 
     fun update(ctx: Context) {
         ensureChannel(ctx)
+        val nm = ctx.getSystemService(NotificationManager::class.java)
         val pending = Store.countPending()
+
+        // 没有待取快递 → 收回通知，平时保持安静
+        if (pending <= 0) {
+            nm.cancel(NOTIF_ID)
+            return
+        }
 
         val open = PendingIntent.getActivity(
             ctx, 0,
@@ -161,20 +171,14 @@ object NotifyHelper {
 
         val b = Notification.Builder(ctx, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_more)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
+            .setOngoing(true)          // 有待取快递时不让划掉，避免误清
+            .setOnlyAlertOnce(true)    // 数量变化不重复提醒
             .setContentIntent(open)
-
-        if (pending > 0) {
-            b.setContentTitle("未取快递 $pending 件")
-            b.setContentText("点击查看取件码")
-        } else {
-            b.setContentTitle("快递取件助手")
-            b.setContentText("暂无待取快递，收到取件短信后会自动记录")
-        }
+            .setContentTitle("未取快递 $pending 件")
+            .setContentText("点击查看取件码")
 
         try {
-            ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_ID, b.build())
+            nm.notify(NOTIF_ID, b.build())
         } catch (_: SecurityException) { /* 未授予通知权限时静默 */ }
     }
 }
@@ -191,7 +195,7 @@ object DeliverySmsHandler : SmsHandler {
         RuleStore.init(context)
         Store.init(context)
         val parsed = PickupParser.parse(body) ?: return
-        if (Store.add(sender, body, parsed.provider, parsed.cabinet, parsed.code)) {
+        if (Store.add(sender, parsed.provider, parsed.cabinet, parsed.code)) {
             NotifyHelper.update(context)
         }
     }
