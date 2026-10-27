@@ -48,3 +48,21 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 }
+
+/**
+ * 产物改名：默认是 app-release.apk，这里改成「包名-版本名-构建类型.apk」，
+ * 例如 smsnotify-1.0-release.apk（取 applicationId 的最后一段，不带 "phoenix." 前缀）。
+ *
+ * 版本号直接取自 applicationId / versionName，改版本时文件名自动跟着走，
+ * 不用在两处维护。outputs 是列表（将来加渠道/ABI 拆分会有多个），统一遍历。
+ */
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            // phoenix.smsnotify → smsnotify
+            val pkg = variant.applicationId.orNull?.substringAfterLast('.') ?: "app"
+            val version = output.versionName.orNull ?: "unspecified"
+            output.outputFileName.set("$pkg-$version-${variant.name}.apk")
+        }
+    }
+}
