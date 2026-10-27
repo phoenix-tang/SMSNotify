@@ -1,12 +1,9 @@
 package phoenix.smsnotify.delivery
 
-import android.Manifest
 import android.app.AlertDialog
-import android.content.pm.PackageManager
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
-import android.os.Build
-import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
@@ -19,12 +16,24 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
-import phoenix.smsnotify.ui.KeepAliveTips
 import phoenix.smsnotify.ui.pressScale
 import phoenix.smsnotify.ui.rowRipple
 
-class MainActivity : BaseActivity() {
+/**
+ * 「快递服务」这一屏：取件记录列表（筛选、全选删除、左滑删除）。
+ *
+ * 原来这一屏就是 MainActivity 本身；加了底部导航之后它变成了主页里的一屏，
+ * 所以逻辑整体搬到这里，只剩「页面骨架」由宿主 Activity 负责。
+ *
+ * 它不是一个 Activity，但要用到宿主的 dp / pageTitle / iconButton，
+ * 因此实现上直接持有 [BaseActivity]（见 BaseActivity 里对 internal 的说明）。
+ *
+ * 生命周期对齐页面可见性：宿主在 onResume 调 [attach]、onPause 调 [detach]，
+ * 切到另一屏时不需要额外处理 —— 数据监听挂在 Store 上，与哪一屏在前台无关。
+ */
+class DeliveryPageView(private val act: BaseActivity) : LinearLayout(act) {
 
     private var filter = 0        // 0=全部 1=未取出 2=已取出
     private var selectionMode = false
@@ -44,55 +53,55 @@ class MainActivity : BaseActivity() {
     private lateinit var emptyView: TextView
 
     private val tabNames = arrayOf("全部", "未取出", "已取出")
-    private val blue = 0xFF1976D2.toInt()
+    private val blue = AppColor.blue
     private val gray = 0xFF9E9E9E.toInt()
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        Store.init(this)
-        RuleStore.init(this)
-        NotifyHelper.ensureChannel(this)
-        setContentView(buildUi())
+    private fun dp(v: Int): Int = act.dp(v)
+
+    init {
+        // 与 BaseActivity.pageRoot() 保持一致：左右 16dp、上下 8dp
+        orientation = VERTICAL
+        gravity = Gravity.TOP
+        setPadding(dp(16), dp(8), dp(16), dp(8))
+        Store.init(act)
+        RuleStore.init(act)
+        buildUi()
         adapter = PickupAdapter()
         listView.adapter = adapter
-        // 权限弹窗还没结束时先不叠第二个弹窗，等结果回来再显示保活指引
-        if (!requestPerms()) KeepAliveTips.showIfNeeded(this)
     }
 
-    override fun onResume() {
-        super.onResume()
-        Store.listener = { runOnUiThread { adapter.notifyDataSetChanged() } }
+    // ---------------- 生命周期 ----------------
+
+    /** 页面可见时挂上数据监听，并刷新一次（切回来能看到新短信） */
+    fun attach() {
+        Store.listener = { act.runOnUiThread { adapter.notifyDataSetChanged() } }
         refresh()
     }
 
-    override fun onPause() {
-        super.onPause()
+    fun detach() {
         Store.listener = null
     }
 
     // ---------------- UI 构建 ----------------
 
-    private fun buildUi(): View {
-        // 统一页面骨架：左右 16dp、上下 8dp 视觉留白，系统栏高度自动避让
-        val root = pageRoot()
-
+    private fun buildUi() {
         // 标题行：标题 + 选择器入口 + 设置齿轮
         // 尺寸全部交给 BaseActivity.pageTitle / iconButton，和子页面保持一致
-        val titleRow = pageTitle("快递取件记录", withBack = false)
-        selectBtn = iconButton("☑") { toggleSelectionMode() }
+        val titleRow = act.pageTitle("快递取件记录", withBack = false)
+        selectBtn = act.iconButton("☑") { toggleSelectionMode() }
         titleRow.addView(selectBtn)
-        titleRow.addView(iconButton("⚙") {
-            startActivity(android.content.Intent(this@MainActivity, SettingsActivity::class.java))
+        titleRow.addView(act.iconButton("⚙") {
+            act.startActivity(Intent(act, SettingsActivity::class.java))
         })
-        root.addView(titleRow)
+        addView(titleRow)
 
         // 选择模式操作行：全选 / 删除（固定在页面底部）
-        actionRow = LinearLayout(this).apply {
+        actionRow = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             visibility = View.GONE
             setPadding(0, dp(4), 0, dp(10))
         }
-        fun actBtn(text: String, weight: Float, onClick: () -> Unit) = Button(this).apply {
+        fun actBtn(text: String, weight: Float, onClick: () -> Unit) = Button(act).apply {
             this.text = text
             textSize = 14f
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight)
@@ -113,12 +122,12 @@ class MainActivity : BaseActivity() {
         actionRow.addView(deleteSelBtn)
 
         // 过滤标签行
-        val tabRow = LinearLayout(this).apply {
+        val tabRow = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(12), 0, dp(4))
         }
         tabs = tabNames.mapIndexed { i, name ->
-            Button(this).apply {
+            Button(act).apply {
                 text = name
                 isAllCaps = false
                 setBackgroundColor(Color.TRANSPARENT)
@@ -131,29 +140,28 @@ class MainActivity : BaseActivity() {
         }
         tabs.forEach { tabRow.addView(it) }
         syncTabs()
-        root.addView(tabRow)
+        addView(tabRow)
 
-        emptyView = TextView(this).apply {
-            text = "暂无记录\n收到含“号柜+取件码”的短信后会自动记录"
+        emptyView = TextView(act).apply {
+            text = "暂无记录\n收到含取件码的短信后会自动记录"
             gravity = Gravity.CENTER
             setPadding(0, dp(80), 0, 0)
             setTextColor(gray)
             setOnClickListener { closeSwipe() }
         }
-        root.addView(emptyView)
+        addView(emptyView)
 
-        listView = ListView(this).apply {
+        listView = ListView(act).apply {
             dividerHeight = dp(1)
             // 点列表空白区域（条目以外）→ 收起删除按钮
             setOnTouchListener { _, _ -> closeSwipe(); false }
         }
-        root.addView(listView, LinearLayout.LayoutParams(
+        addView(listView, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
         // 选择模式操作行固定在页面底部
-        root.addView(actionRow)
-        return root
+        addView(actionRow)
     }
 
     // ---------------- 状态与刷新 ----------------
@@ -182,10 +190,10 @@ class MainActivity : BaseActivity() {
         selectAllBtn.text = "全选 ${selected.size}/${vis.size}"
     }
 
-    private fun refresh() {
+    fun refresh() {
         closeSwipe()
         if (::adapter.isInitialized) adapter.notifyDataSetChanged()
-        NotifyHelper.update(this)
+        NotifyHelper.update(act)
         if (::deleteSelBtn.isInitialized) syncAction()
     }
 
@@ -304,14 +312,14 @@ class MainActivity : BaseActivity() {
 
     private fun confirmDeleteSelected() {
         if (selected.isEmpty()) return
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(act)
             .setTitle("删除记录")
             .setMessage("确定删除选中的 ${selected.size} 条记录？")
             .setPositiveButton("删除") { _, _ ->
                 Store.removeAll(selected)
                 selected.clear()
                 selectionMode = false
-                selectBtn.text = "☑"       // 之前误写成"选择"，和图标按钮不一致
+                selectBtn.text = "☑"
                 actionRow.animate().cancel()
                 actionRow.alpha = 1f
                 actionRow.translationY = 0f
@@ -320,25 +328,6 @@ class MainActivity : BaseActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
-    }
-
-    /** 返回是否弹出了权限申请（弹出时保活指引要等申请结果回来再显示，避免两个弹窗叠一起） */
-    private fun requestPerms(): Boolean {
-        val perms = mutableListOf(Manifest.permission.RECEIVE_SMS)
-        if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        val missing = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isEmpty()) return false
-        requestPermissions(missing.toTypedArray(), 1)
-        return true
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        refresh()
-        // 无论用户同意还是拒绝都提示一次：没权限收不到短信，没白名单同样收不到
-        KeepAliveTips.showIfNeeded(this)
     }
 
     // ---------------- 列表适配器 ----------------
@@ -408,7 +397,7 @@ class MainActivity : BaseActivity() {
             // 长按：单条删除确认（仅普通模式）
             front.setOnLongClickListener {
                 if (selectionMode) return@setOnLongClickListener false
-                AlertDialog.Builder(this@MainActivity)
+                AlertDialog.Builder(act)
                     .setTitle("删除记录")
                     .setMessage("删除 ${r.desc} 的记录？")
                     .setPositiveButton("删除") { _, _ -> Store.remove(r.id); refresh() }
@@ -424,11 +413,11 @@ class MainActivity : BaseActivity() {
         }
 
         private fun createRow(): FrameLayout {
-            val check = CheckBox(this@MainActivity).apply {
+            val check = CheckBox(act).apply {
                 isClickable = false; isFocusable = false
             }
             // 状态圆标：绿圈√=已取 / 黄圈i=未取
-            val statusIcon = TextView(this@MainActivity).apply {
+            val statusIcon = TextView(act).apply {
                 gravity = Gravity.CENTER
                 textSize = 14f
                 setTypeface(null, Typeface.BOLD)
@@ -441,14 +430,14 @@ class MainActivity : BaseActivity() {
                     marginEnd = dp(10)
                 }
             }
-            val textCol = LinearLayout(this@MainActivity).apply {
+            val textCol = LinearLayout(act).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                addView(TextView(this@MainActivity))
-                addView(TextView(this@MainActivity))
+                addView(TextView(act))
+                addView(TextView(act))
             }
             // 前景条目：宽度固定，左侧文字始终可见，右侧越界文字被删除按钮覆盖
-            val front = LinearLayout(this@MainActivity).apply {
+            val front = LinearLayout(act).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setBackgroundColor(Color.WHITE)
@@ -462,7 +451,7 @@ class MainActivity : BaseActivity() {
                 addView(textCol)
             }
             // 删除按钮：铺满行高，平时平移出屏幕右缘（收起），左滑时滑入覆盖右侧
-            val delBtn = Button(this@MainActivity).apply {
+            val delBtn = Button(act).apply {
                 text = "删除"
                 setBackgroundColor(0xFFE53935.toInt())
                 setTextColor(Color.WHITE)
@@ -471,7 +460,7 @@ class MainActivity : BaseActivity() {
                     dp(delWidthDp), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END
                 )
             }
-            return FrameLayout(this@MainActivity).apply {
+            return FrameLayout(act).apply {
                 addView(front)
                 addView(delBtn)   // 后添加 → 画在条目上层
             }

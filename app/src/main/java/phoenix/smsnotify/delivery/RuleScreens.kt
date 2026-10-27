@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.ToggleView
 import phoenix.smsnotify.ui.pressScale
@@ -117,7 +118,7 @@ class RulesActivity : BaseActivity() {
             line1.setTextColor(
                 when {
                     !r.enabled -> gray
-                    r.preset -> 0xFF1976D2.toInt()
+                    r.preset -> AppColor.blue
                     else -> Color.BLACK
                 }
             )
@@ -234,7 +235,7 @@ class RuleEditActivity : BaseActivity() {
                 text = "预设规则随应用更新：参数只读，不能修改或删除，只能回列表用开关停用（自己添加的规则不受影响）。" +
                     "下面可以粘贴短信试匹配。"
                 textSize = 13f
-                setTextColor(0xFF1976D2.toInt())
+                setTextColor(AppColor.blue)
                 setPadding(0, 4, 0, 4)
             })
         }
@@ -436,7 +437,7 @@ class RuleEditActivity : BaseActivity() {
                 text = centerLabel
                 textSize = 16f
                 setTypeface(null, Typeface.BOLD)
-                setTextColor(0xFF1976D2.toInt())
+                setTextColor(AppColor.blue)
                 setPadding(12, 0, 12, 0)
             })
             addView(field(rightHint, rightValue))

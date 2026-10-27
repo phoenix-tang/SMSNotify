@@ -8,13 +8,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.rowRipple
 
 /** 设置页：多级条目入口 */
 class SettingsActivity : BaseActivity() {
 
-    private val blue = 0xFF1976D2.toInt()
+    private val blue = AppColor.blue
     private val gray = 0xFF9E9E9E.toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {

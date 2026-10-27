@@ -15,7 +15,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * 项目里仅有的两个自绘控件都放在这个文件里：
+ * 项目里的自绘控件：本文件放「有交互状态」的控件，纯图形图标在 Icons.kt。
  *
  *  - [BackChevronView]：页面标题行的返回箭头
  *  - [ToggleView]：规则列表右侧的绿/白开关

@@ -25,6 +25,19 @@ import android.view.animation.OvershootInterpolator
 const val RIPPLE_COLOR = 0x2E1976D2
 
 /**
+ * dp → px（View 扩展）。
+ *
+ * `BaseActivity` 里已经有一个 `dp(Int)`，但页面视图和自绘控件不是 Activity 子类，
+ * 之前每个类都各写一个 private `dp()`，重复且容易写错取整方式。统一收在这里：
+ *
+ *     setPadding(0, dp(8).toInt(), 0, dp(8).toInt())
+ */
+fun View.dp(v: Float): Float = v * resources.displayMetrics.density
+
+/** 同上，直接要整数像素（给 setPadding / LayoutParams 用） */
+fun View.dpi(v: Float): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
+
+/**
  * 按压缩放反馈：按下缩到 [pressedScale]，松开带一点回弹。
  * 用 StateListAnimator，因此不会和既有的 OnTouchListener / 点击事件抢手势。
  */

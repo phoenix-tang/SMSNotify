@@ -168,7 +168,7 @@ object KeepAliveTips {
 
     // ---------------- 小工具 ----------------
 
-    private val BLUE = 0xFF1976D2.toInt()
+    private val BLUE = AppColor.blue
     private val BODY = 0xFF424242.toInt()
 
     /** 当前设备属于哪一家（-1 = 不在名单里，四家全都不高亮） */

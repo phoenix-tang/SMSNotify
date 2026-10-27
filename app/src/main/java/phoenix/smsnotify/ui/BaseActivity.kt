@@ -38,8 +38,17 @@ import android.widget.TextView
  *
  * 表单页（可能弹出输入法）额外设置 [avoidIme] = true，并放进可滚动容器，否则键盘会盖住底部按钮。
  *
- * 本类只负责「页面骨架 + 系统栏」；按压动画与水波纹在 UiFx.kt，自绘控件在 Widgets.kt ——
- * 都属于 ui 这个公共模块，任何功能页面都能直接用。
+ * 本类只负责「页面骨架 + 系统栏」。其余公共 UI 都在 ui 包里，任何功能页面都能直接用：
+ *  - UiFx.kt —— 按压/水波纹、dp 换算
+ *  - Widgets.kt —— 返回箭头、开关
+ *  - Icons.kt —— 描边图标控件与图标路径
+ *  - Theme.kt —— 全局配色
+ *  - BottomNav.kt —— 底部导航
+ *
+ * 主页是「一个 Activity + 底部导航 + 多个页面视图」：页面视图（如 DeliveryPageView）
+ * 不是 Activity 的子类，但同样需要 [dp] / [pageRoot] / [pageTitle] / [iconButton]。
+ * 因此这四个成员是 internal（本模块内可见）而不是 protected —— 让页面视图直接复用，
+ * 避免每个页面各写一套尺寸，视觉规格也就不会走样。
  */
 open class BaseActivity : Activity() {
 
@@ -58,14 +67,14 @@ open class BaseActivity : Activity() {
     protected val iconButtonDp = 40
 
     /** dp → px */
-    protected fun dp(v: Int): Int =
+    internal fun dp(v: Int): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
 
     /**
      * 页面根容器：竖向 LinearLayout，统一留白（左右 16dp、上下 8dp）。
      * 留白只是视觉间距，状态栏/导航栏高度由 [setContentView] 自动叠加。
      */
-    protected fun pageRoot(topDp: Int = 8, bottomDp: Int = 8): LinearLayout =
+    internal fun pageRoot(topDp: Int = 8, bottomDp: Int = 8): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.TOP
@@ -98,7 +107,7 @@ open class BaseActivity : Activity() {
      *
      * 标题带 weight=1，因此外部可以继续往右侧 addView 图标按钮，图标会自动靠右。
      */
-    protected fun pageTitle(title: String, withBack: Boolean = true): LinearLayout {
+    internal fun pageTitle(title: String, withBack: Boolean = true): LinearLayout {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -125,7 +134,7 @@ open class BaseActivity : Activity() {
     }
 
     /** 标题行右侧的图标按钮：固定方形触摸区 + 圆形水波纹 + 按压缩放 */
-    protected fun iconButton(glyph: String, onClick: () -> Unit): TextView =
+    internal fun iconButton(glyph: String, onClick: () -> Unit): TextView =
         TextView(this).apply {
             text = glyph
             textSize = titleSp

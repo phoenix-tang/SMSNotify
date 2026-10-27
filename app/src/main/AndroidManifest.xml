@@ -12,17 +12,26 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
-        <!-- ===== 快递功能（delivery 包） ===== -->
-        <activity android:name=".delivery.MainActivity" android:exported="true">
+        <!-- ===== 主页：底部导航的宿主，下挂「快递服务」「重要短信提醒」两屏 ===== -->
+        <!-- singleTop：从通知点进来时复用同一个实例，直接切 Tab，而不是重开一页 -->
+        <activity
+            android:name=".MainActivity"
+            android:launchMode="singleTop"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <!-- ===== 快递功能（delivery 包） ===== -->
         <activity android:name=".delivery.SettingsActivity" android:exported="false" />
         <activity android:name=".delivery.RulesActivity" android:exported="false" />
         <activity android:name=".delivery.RuleEditActivity"
+            android:windowSoftInputMode="adjustResize" android:exported="false" />
+
+        <!-- ===== 重要短信提醒（important 包） ===== -->
+        <activity android:name=".important.ImportantRuleEditActivity"
             android:windowSoftInputMode="adjustResize" android:exported="false" />
 
         <!-- ===== 公共的短信读取层（sms 包）：与具体功能无关 ===== -->

@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import phoenix.smsnotify.MainActivity
 import phoenix.smsnotify.sms.SmsHandler
 import org.json.JSONArray
 import org.json.JSONObject

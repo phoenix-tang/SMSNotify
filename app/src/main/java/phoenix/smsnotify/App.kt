@@ -2,6 +2,7 @@ package phoenix.smsnotify
 
 import android.app.Application
 import phoenix.smsnotify.delivery.DeliverySmsHandler
+import phoenix.smsnotify.important.ImportantSmsHandler
 import phoenix.smsnotify.sms.SmsRouter
 
 /**
@@ -10,11 +11,14 @@ import phoenix.smsnotify.sms.SmsRouter
  * 进程被系统杀掉后，收到短信会重新拉起进程 —— Application.onCreate 一定先于
  * BroadcastReceiver.onReceive 执行，所以注册永远不会漏。
  *
- * 以后新增「验证码」「银行动账」等功能，只要在这里多加一行 register。
+ * 每个模块收到同一条短信后各自判断关不关心，互不影响：
+ *  - [DeliverySmsHandler]  快递取件（规则匹配 → 取件记录 → 常驻通知）
+ *  - [ImportantSmsHandler] 重要短信提醒（关键字命中 → 记录 + 响铃通知）
  */
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
         SmsRouter.register(DeliverySmsHandler)
+        SmsRouter.register(ImportantSmsHandler)
     }
 }
