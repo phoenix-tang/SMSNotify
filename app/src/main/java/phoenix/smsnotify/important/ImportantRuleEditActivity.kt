@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
@@ -31,6 +32,9 @@ class ImportantRuleEditActivity : BaseActivity() {
     private var ruleId = -1L
     private var origin: ImportantRule? = null
 
+    /** 当前选择的响铃时长（毫秒），语义见 [RingMode] */
+    private var ringMs = 0L
+
     private val gray = 0xFF9E9E9E.toInt()
     private val blue = AppColor.blue
     private val green = 0xFF2E7D32.toInt()
@@ -41,6 +45,7 @@ class ImportantRuleEditActivity : BaseActivity() {
     private lateinit var keywordCount: TextView
     private lateinit var testInput: EditText
     private lateinit var testResult: TextView
+    private lateinit var ringValue: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,6 +92,16 @@ class ImportantRuleEditActivity : BaseActivity() {
         root.addView(note(
             "每行一段文字，不区分大小写；所有行都出现在同一条短信里才算命中，才记一条并响铃提醒。\n" +
                 "文字要尽量短而具体，写「余额」会连广告短信一起命中，写「尾号1234」更准。"
+        ))
+
+        // 响铃时长
+        ringMs = rule?.ringMs ?: 0L
+        root.addView(label("响铃时长"))
+        root.addView(buildRingRow())
+        root.addView(note(
+            "「单次提示」用系统通知音，响一遍就结束。10 秒以上由应用自己循环播放闹钟音，到点自动停。\n" +
+                "选「持续响铃」会一直响下去，直到点通知上的「停止响铃」、划掉那条通知，或者打开本应用 —— " +
+                "适合绝不能错过的那一类短信。"
         ))
 
         // 测试区
@@ -159,7 +174,8 @@ class ImportantRuleEditActivity : BaseActivity() {
         name = nameEdit.text.toString().trim(),
         keywords = keywordsOf(keywordEdit.text.toString()),
         enabled = origin?.enabled ?: true,
-        createdAt = origin?.createdAt ?: System.currentTimeMillis()
+        createdAt = origin?.createdAt ?: System.currentTimeMillis(),
+        ringMs = ringMs
     )
 
     /** 边输入边给反馈：几段文字 + 这条测试短信会不会命中 */
@@ -197,6 +213,55 @@ class ImportantRuleEditActivity : BaseActivity() {
         ImportantStore.save(rule)
         Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
         finish()
+    }
+
+    /**
+     * 「响铃时长」设置行。
+     *
+     * 用「一整行可点 + 右侧显示当前值」，而不是把 6 个选项铺成一排按钮：
+     * 中文选项从「单次提示」到「持续响铃，手动停止」宽度差很大，等分排会挤成两行、
+     * 长的那几个还会被截断。点开单选列表，一眼看全，也不用担心窄屏。
+     */
+    private fun buildRingRow(): View {
+        ringValue = TextView(this).apply {
+            text = RingMode.of(ringMs).label
+            textSize = 15f
+            setTextColor(blue)
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(14), dp(12), dp(14))
+            setBackgroundColor(0xFFF7F7F9.toInt())
+            isClickable = true
+            isFocusable = true
+            addView(TextView(this@ImportantRuleEditActivity).apply {
+                text = "收到后响多久"
+                textSize = 15f
+                setTextColor(Color.BLACK)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            addView(ringValue)
+            addView(TextView(this@ImportantRuleEditActivity).apply {
+                text = "  ›"
+                textSize = 15f
+                setTextColor(gray)
+            })
+            setOnClickListener { pickRing() }
+        }
+    }
+
+    private fun pickRing() {
+        val modes = RingMode.entries
+        AlertDialog.Builder(this)
+            .setTitle("响铃时长")
+            .setSingleChoiceItems(modes.map { it.label }.toTypedArray(), RingMode.of(ringMs).ordinal) { d, which ->
+                ringMs = modes[which].ms
+                ringValue.text = modes[which].label
+                d.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun label(text: String): TextView = TextView(this).apply {

@@ -260,6 +260,18 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
             }
         }
 
+        // 非默认响铃时长给个小红标签：一眼能看出"这条会一直响"，不用点进去确认
+        val ringTag = if (rule.ringMs != 0L) TextView(act).apply {
+            text = "响 ${rule.ringMode.label}"
+            textSize = 11f
+            setTextColor(0xFFC62828.toInt())
+            setPadding(dp(6), dp(2), dp(6), dp(2))
+            background = rounded(0xFFFDECEA.toInt(), null, 8)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { marginStart = dp(8) }
+        } else null
+
         val header = LinearLayout(act).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -269,6 +281,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
             rowRipple(cornerDp = 12)
             addView(arrow)
             addView(name)
+            ringTag?.let { addView(it) }
             addView(count)
             addView(toggle)
         }

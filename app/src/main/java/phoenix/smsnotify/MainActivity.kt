@@ -13,6 +13,7 @@ import phoenix.smsnotify.delivery.DeliveryPageView
 import phoenix.smsnotify.delivery.NotifyHelper
 import phoenix.smsnotify.delivery.RuleStore
 import phoenix.smsnotify.delivery.Store
+import phoenix.smsnotify.important.AlarmRing
 import phoenix.smsnotify.important.ImportantNotify
 import phoenix.smsnotify.important.ImportantPageView
 import phoenix.smsnotify.important.ImportantStore
@@ -102,6 +103,9 @@ class MainActivity : BaseActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 打开 App 就算"我看到了"：长响的规则不该在用户盯着屏幕时继续叫，
+        // 通知上的「停止响铃」和划掉通知是另两条退路
+        AlarmRing.stop()
         // 两屏都挂监听：另一屏不在前台时收到的短信，切过去就是最新的
         deliveryPage.attach()
         importantPage.attach()

@@ -45,6 +45,11 @@ object AppNotify {
          * 传 `AudioAttributes.USAGE_ALARM` 则走闹钟流，静音模式下也能出声。
          */
         val soundUsage: Int? = null,
+        /**
+         * 渠道完全不出声。声音由 App 自己放时（长响：要循环、要按秒数停）必须打开，
+         * 否则系统那一声短提示会和循环铃声叠在一起，听起来像"卡了两下"。
+         */
+        val silent: Boolean = false,
         /** 振动节奏（毫秒，`[0, 400, 200, 400]` 这种），null = 不振动 */
         val vibration: LongArray? = null,
         val lights: Boolean = false,
@@ -55,7 +60,9 @@ object AppNotify {
     fun ensureChannel(ctx: Context, spec: ChannelSpec) {
         val ch = NotificationChannel(spec.id, spec.name, spec.importance).apply {
             description = spec.description
-            if (spec.soundUsage != null) {
+            if (spec.silent) {
+                setSound(null, null)
+            } else if (spec.soundUsage != null) {
                 setSound(
                     RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
                     AudioAttributes.Builder()

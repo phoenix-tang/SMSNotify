@@ -34,6 +34,11 @@
         <activity android:name=".important.ImportantRuleEditActivity"
             android:windowSoftInputMode="adjustResize" android:exported="false" />
 
+        <!-- 通知上的「停止响铃」和划掉通知都发到这里：只由本应用的 PendingIntent 触发，不对外开放 -->
+        <receiver
+            android:name=".important.StopRingReceiver"
+            android:exported="false" />
+
         <!-- ===== 公共的短信读取层（sms 包）：与具体功能无关 ===== -->
         <!-- 只允许系统发送该广播，防止第三方伪造取件短信 -->
         <receiver
