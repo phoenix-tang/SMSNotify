@@ -1,10 +1,10 @@
 {
   "rules": [
     {
-      "name": "兔喜",
+      "name": "通用1",
       "cabPrefix": "",
       "cabSuffix": "号柜",
-      "codePrefix": "取件码为",
+      "codePrefix": "取件码",
       "codeSuffix": "",
       "enabled": true
     }

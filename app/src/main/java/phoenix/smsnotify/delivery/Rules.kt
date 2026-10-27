@@ -264,14 +264,27 @@ object RuleStore {
 
     /** 柜架号：只捕获数字，"号柜"这类文字交给后缀字段（后缀是字面量，不进捕获组） */
     private const val CAB_CAPTURE = "(\\d+)"
-    /** 取件码：数字，可含连字符，如 205936 / 3-2-5016 */
+    /** 取件码：数字，可含连字符，如 111111 / 3-2-5016 */
     private const val CODE_CAPTURE = "((?:\\d+-)*\\d{3,})"
+
+    /**
+     * 取件码前缀与数字之间的「间隔」：允许 0~4 个**非数字**字符。
+     *
+     * 同一家服务商的不同模板、不同服务商之间，这个位置什么字符都有：
+     * 「取件码111111」「取件码为111111」「取件码：111111」「取件码 111111」。
+     * 没有它就得为每种写法各建一条规则，前缀也就失去了「写一次管一类」的意义；
+     * 有它则写到「取件码」为止即可，后面的连接词随便是什么都能对上。
+     *
+     * 只放宽前缀这一侧：取件码本身和柜架号仍要求紧贴它们的字面量（后缀侧不放宽），
+     * 否则「取件码3天后失效，验证码1234」这种正文会把不相干的数字抓走。
+     */
+    private const val CODE_GAP = "[^0-9]{0,4}"
 
     private fun cabinetPattern(r: ExtractRule): String =
         lit(r.cabPrefix) + CAB_CAPTURE + lit(r.cabSuffix)
 
     private fun codePattern(r: ExtractRule): String =
-        lit(r.codePrefix) + CODE_CAPTURE + lit(r.codeSuffix)
+        lit(r.codePrefix) + CODE_GAP + CODE_CAPTURE + lit(r.codeSuffix)
 
     /**
      * 把用户输入整体转成字面量，**一个字都不当作正则解释**。

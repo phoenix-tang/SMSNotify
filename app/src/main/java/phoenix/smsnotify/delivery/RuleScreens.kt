@@ -9,7 +9,9 @@ import android.text.Editable
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.TextWatcher
+import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -195,6 +197,9 @@ class RuleEditActivity : BaseActivity() {
 
     private val gray = 0xFF9E9E9E.toInt()
 
+    /** 前后缀输入框里「前缀」「后缀」占位提示的字色：比标签灰再浅一档 */
+    private val hintGray = 0xFFBDBDBD.toInt()
+
     private lateinit var nameEdit: EditText
     private lateinit var cabPrefix: EditText
     private lateinit var cabSuffix: EditText
@@ -260,6 +265,11 @@ class RuleEditActivity : BaseActivity() {
             codePrefix = codeRow.getChildAt(0) as EditText
             codeSuffix = codeRow.getChildAt(2) as EditText
         })
+        // 「间隔」是代码里的固定行为，界面上看不见，所以在这里说明它到底放宽了什么
+        root.addView(note(
+            "注意：前缀和取件码之间允许 0~4 个其他字符，所以前缀填「取件码」就能匹配「取件码111111」「取件码为111111」「取件码： 111111」。\n" +
+            "柜架号那一侧没有这个间隔，必须紧贴前后缀。"
+        ))
 
         // 测试区
         root.addView(label("测试（粘贴一条真实短信试试）"))
@@ -346,7 +356,8 @@ class RuleEditActivity : BaseActivity() {
 
         val m = RuleStore.matchOne(r, sample)
         if (m == null) {
-            testResult.text = "✘ 未匹配，请检查取件码前缀/后缀是否与短信原文一致"
+            testResult.text = "✘ 未匹配，请检查取件码前缀/后缀是否与短信原文一致" +
+                "（前缀后允许 0~4 个其他字符，再往后要是 3 位以上数字）"
             testResult.setTextColor(0xFFC62828.toInt())
             return
         }
@@ -385,15 +396,36 @@ class RuleEditActivity : BaseActivity() {
         setPadding(0, 24, 0, 8)
     }
 
+    /** 小字说明：黑色加粗、字号偏小，挂在某个输入区下面，解释用户看不见的固定规则 */
+    private fun note(text: String): TextView = TextView(this).apply {
+        this.text = text
+        textSize = 12f
+        setTextColor(Color.BLACK)
+        setTypeface(null, Typeface.BOLD)
+        setLineSpacing(dp(2).toFloat(), 1f)
+        setPadding(0, 6, 0, 0)
+    }
+
     private fun splicerRow(
         leftHint: String, rightHint: String,
         leftValue: String, rightValue: String,
         centerLabel: String
     ): LinearLayout {
         fun field(hint: String, value: String): EditText = EditText(this).apply {
-            this.hint = hint
+            // 空着时只看得到提示语：浅灰白、不加粗，明确是「占位说明」；
+            // 一旦填了内容就是黑色加粗，填没填一眼就能分辨
+            setHint(SpannableString(hint).apply {
+                setSpan(
+                    ForegroundColorSpan(hintGray), 0, length,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+                setSpan(StyleSpan(Typeface.NORMAL), 0, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            })
+            setHintTextColor(hintGray)
             setText(value)
             textSize = 14f
+            setTextColor(Color.BLACK)
+            setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         return LinearLayout(this).apply {
