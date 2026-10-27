@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import phoenix.smsnotify.ui.BaseActivity
+import phoenix.smsnotify.ui.KeepAliveTips
 import phoenix.smsnotify.ui.pressScale
 import phoenix.smsnotify.ui.rowRipple
 
@@ -54,7 +55,8 @@ class MainActivity : BaseActivity() {
         setContentView(buildUi())
         adapter = PickupAdapter()
         listView.adapter = adapter
-        requestPerms()
+        // 权限弹窗还没结束时先不叠第二个弹窗，等结果回来再显示保活指引
+        if (!requestPerms()) KeepAliveTips.showIfNeeded(this)
     }
 
     override fun onResume() {
@@ -320,11 +322,14 @@ class MainActivity : BaseActivity() {
             .show()
     }
 
-    private fun requestPerms() {
+    /** 返回是否弹出了权限申请（弹出时保活指引要等申请结果回来再显示，避免两个弹窗叠一起） */
+    private fun requestPerms(): Boolean {
         val perms = mutableListOf(Manifest.permission.RECEIVE_SMS)
         if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
         val missing = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 1)
+        if (missing.isEmpty()) return false
+        requestPermissions(missing.toTypedArray(), 1)
+        return true
     }
 
     override fun onRequestPermissionsResult(
@@ -332,6 +337,8 @@ class MainActivity : BaseActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         refresh()
+        // 无论用户同意还是拒绝都提示一次：没权限收不到短信，没白名单同样收不到
+        KeepAliveTips.showIfNeeded(this)
     }
 
     // ---------------- 列表适配器 ----------------
