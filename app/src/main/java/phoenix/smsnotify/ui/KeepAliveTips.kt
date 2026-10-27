@@ -24,17 +24,25 @@ import android.widget.TextView
  * 纯代码无法自救（`cmd deviceidle whitelist` 对厂商自己的冻结机制也无效），
  * 只能引导用户去系统设置里放行这一次。
  *
- * 触发时机：**每次安装/更新后的第一次打开**，不做任何「是否已开启」的检测
- * （各厂商设置项的读法不统一，检测既不可靠也会误弹）。
- * 用一个「安装/更新时间戳」当标记：装新包时间戳必变，于是新装、覆盖升级都会再弹一次，
- * 同一个包反复打开则只弹第一次。
+ * 触发时机：新装后的第一次打开弹一次（[showIfNeeded]）；之后用户随时可以从主页标题栏的
+ * 「帮助」按钮把它调出来（[showNow]）。不做任何「是否已开启」的检测 —— 各厂商设置项的
+ * 读法不统一，检测既不可靠也会误弹。
+ *
+ * 标记用**布尔值**，不用「安装/更新时间戳」：这里讲的是一次性的系统配置（自启动、省电策略），
+ * 设过一次就一直有效，App 更新并不会把它改回去，所以升级后再弹一遍只是打扰。
+ * 布尔值只有「装过这个 App」和「没装过」两种状态，正好对上这个语义；
+ * 时间戳方案（`PackageInfo.lastUpdateTime`）会在每次覆盖安装后再弹一次（开发期尤其烦），
+ * 而且个别 ROM 上这个字段可能读到 0，会退化成每次都弹或永远不弹。
+ *
+ * 代价是：以后往弹窗里加新内容时，已经点过「知道了」的老用户看不到。真到那时把
+ * KEY_SHOWN 换成带版本号的 key（`keepalive_tips_shown_v2`）就行，改动同样只有一行。
  *
  * 不依赖用户当时点「去设置」：看过一眼知道去哪设，就已经达到目的。
  */
 object KeepAliveTips {
 
     private const val PREFS = "app_prefs"
-    private const val KEY_STAMP = "keepalive_tips_stamp"
+    private const val KEY_SHOWN = "keepalive_tips_shown"
 
     /** 一家厂商的入口说明；[keys] 用于和 Build.MANUFACTURER 比对，命中后高亮 */
     private class Vendor(val name: String, val keys: List<String>, val steps: List<String>)
@@ -76,13 +84,18 @@ object KeepAliveTips {
         )
     )
 
-    /** 新装或升级后的第一次打开才弹；已在本次安装中弹过就直接返回 */
+    /** 新装后的第一次打开才弹；已经弹过就直接返回 */
     fun showIfNeeded(activity: Activity) {
         if (activity.isFinishing) return
         val prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val stamp = installStamp(activity)
-        if (prefs.getLong(KEY_STAMP, -1L) == stamp) return
-        prefs.edit().putLong(KEY_STAMP, stamp).apply()   // 先记账：弹窗中途被杀也不会反复弹
+        if (prefs.getBoolean(KEY_SHOWN, false)) return
+        prefs.edit().putBoolean(KEY_SHOWN, true).apply()   // 先记账：弹窗中途被杀也不会反复弹
+        show(activity)
+    }
+
+    /** 用户主动点标题栏「帮助」时调用：不看记录，随时都能看一遍 */
+    fun showNow(activity: Activity) {
+        if (activity.isFinishing) return
         show(activity)
     }
 
@@ -176,14 +189,6 @@ object KeepAliveTips {
         val brand = (Build.MANUFACTURER + " " + Build.BRAND).lowercase()
         return vendors.indexOfFirst { v -> v.keys.any { brand.contains(it) } }
     }
-
-    /**
-     * 安装/更新时间戳：新装与覆盖升级都会变，同一个包不变。
-     * 用它当标记，既覆盖「首次安装」，也覆盖「更新后首次打开」。
-     */
-    private fun installStamp(activity: Activity): Long = try {
-        activity.packageManager.getPackageInfo(activity.packageName, 0).lastUpdateTime
-    } catch (_: Exception) { 0L }
 
     private fun appLabel(activity: Activity): String = try {
         val pm = activity.packageManager

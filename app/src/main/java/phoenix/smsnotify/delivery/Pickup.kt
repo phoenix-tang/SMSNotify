@@ -1,20 +1,13 @@
 package phoenix.smsnotify.delivery
 
-import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.os.Build
 import phoenix.smsnotify.MainActivity
+import phoenix.smsnotify.common.AppNotify
 import phoenix.smsnotify.sms.SmsHandler
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 快递功能的数据层：一条取件记录从「收到短信」到「落盘 + 通知」的完整链路。
@@ -56,7 +49,6 @@ object Store {
     private val records = mutableListOf<PickupRecord>()
     private var nextId = 1L
     private var file: File? = null
-    private val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
 
     /** 数据变更监听：界面在前台时收到短信可即时刷新 */
     var listener: (() -> Unit)? = null
@@ -114,8 +106,6 @@ object Store {
 
     fun countPending(): Int = records.count { !it.taken }
 
-    fun fmtTime(t: Long): String = fmt.format(Date(t))
-
     private fun save() {
         val arr = JSONArray()
         records.forEach { r ->
@@ -135,52 +125,40 @@ object Store {
  *
  * 它不承担保活职责（通知本身也不会让进程免于被冻结），
  * 空闲时留在通知栏只会制造噪音，所以 pending 为 0 直接 cancel。
+ *
+ * 渠道是「安静型」：IMPORTANCE_LOW、不振动、不亮灯。它是一块长期挂着的信息面板，
+ * 不是一个事件 —— 真正需要叫醒用户的是重要短信那条，两者刻意分开，用户可以只关一条。
  */
 object NotifyHelper {
-    private const val CHANNEL_ID = "deliveries"
+    private val CHANNEL = AppNotify.ChannelSpec(
+        id = "deliveries",
+        name = "快递取件提醒",
+        description = "有未取快递时显示，全部取出后自动消失",
+        importance = NotificationManager.IMPORTANCE_LOW
+    )
+
     private const val NOTIF_ID = 1001
 
-    fun ensureChannel(ctx: Context) {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(
-                CHANNEL_ID, "快递取件提醒", NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "有未取快递时显示" }
-            // 已存在的渠道也会被更新名称/描述（重要性与声音不可改，这里只改文案）
-            ctx.getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(ch)
-        }
-    }
+    fun ensureChannel(ctx: Context) = AppNotify.ensureChannel(ctx, CHANNEL)
 
     fun update(ctx: Context) {
         ensureChannel(ctx)
-        val nm = ctx.getSystemService(NotificationManager::class.java)
-        val pending = Store.countPending()
 
         // 没有待取快递 → 收回通知，平时保持安静
+        val pending = Store.countPending()
         if (pending <= 0) {
-            nm.cancel(NOTIF_ID)
+            AppNotify.cancel(ctx, NOTIF_ID)
             return
         }
 
-        val open = PendingIntent.getActivity(
-            ctx, 0,
-            Intent(ctx, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val b = Notification.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_more)
-            .setOngoing(true)          // 有待取快递时不让划掉，避免误清
-            .setOnlyAlertOnce(true)    // 数量变化不重复提醒
-            .setContentIntent(open)
-            .setContentTitle("未取快递 $pending 件")
-            .setContentText("点击查看取件码")
-
-        try {
-            nm.notify(NOTIF_ID, b.build())
-        } catch (_: SecurityException) { /* 未授予通知权限时静默 */ }
+        AppNotify.post(ctx, CHANNEL.id, NOTIF_ID) { b ->
+            b.setSmallIcon(android.R.drawable.stat_notify_more)
+                .setOngoing(true)          // 有待取快递时不让划掉，避免误清
+                .setOnlyAlertOnce(true)    // 数量变化不重复提醒
+                .setContentIntent(AppNotify.openApp(ctx, MainActivity.TAB_DELIVERY))
+                .setContentTitle("未取快递 $pending 件")
+                .setContentText("点击查看取件码")
+        }
     }
 }
 

@@ -1,24 +1,20 @@
 package phoenix.smsnotify.important
 
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.graphics.Typeface
+import android.media.AudioAttributes
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import phoenix.smsnotify.MainActivity
+import phoenix.smsnotify.common.AppNotify
 import phoenix.smsnotify.sms.SmsHandler
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 「重要短信提醒」的数据层与短信链路。
@@ -82,7 +78,6 @@ object ImportantStore {
     private var nextRuleId = 1L
     private var nextHitId = 1L
     private var file: File? = null
-    private val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
 
     /** 数据变更监听：页面在前台时收到短信可即时刷新 */
     var listener: (() -> Unit)? = null
@@ -182,8 +177,6 @@ object ImportantStore {
         val r = find(h.ruleId) ?: return null
         return r to h
     }
-
-    fun fmtTime(t: Long): String = fmt.format(Date(t))
 
     // ---------- 增删改 ----------
 
@@ -365,57 +358,51 @@ private fun buildSnippetLine(
  * 两条通知渠道分开，用户可以在系统设置里单独关掉其中一个。
  */
 object ImportantNotify {
-    private const val CHANNEL_ID = "important_sms"
+    /**
+     * 提醒用的渠道：**高重要性 + 闹钟流声音 + 三短一停振动**。
+     *
+     * 声音走 `USAGE_ALARM` 而不是默认的通知流：通知流只要手机开静音就一声不响 ——
+     * 对"重要短信"来说这是最不能接受的失败方式。闹钟流独立于铃声/通知音量，静音模式下
+     * 仍然会响，代价是受"闹钟音量"控制，勿扰里勾了"屏蔽闹钟"时同样无效（那属于用户明确选择）。
+     *
+     * 渠道参数只在创建时固化（之后同 id 再建只更新名称/描述），开发阶段改完卸载重装即可。
+     */
+    private val CHANNEL = AppNotify.ChannelSpec(
+        id = "important_sms",
+        name = "重要短信提醒",
+        description = "收到命中重要规则的短信时响铃提醒（静音模式下也会响，走闹钟音量）",
+        importance = NotificationManager.IMPORTANCE_HIGH,
+        soundUsage = AudioAttributes.USAGE_ALARM,
+        // 三短一停：比系统默认的两下更容易被注意到，又不像来电那样长震
+        vibration = longArrayOf(0, 400, 200, 400, 200, 400),
+        lights = true
+    )
+
     private const val NOTIF_ID = 2002   // 固定 id：后到的覆盖前一条，连收几条不会堆满通知栏
 
-    // minSdk 31，渠道相关 API 都在 26 以上，不需要版本判断
-    fun ensureChannel(ctx: Context) {
-        val ch = NotificationChannel(
-            CHANNEL_ID, "重要短信提醒", NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "收到命中重要规则的短信时响铃提醒"
-            enableVibration(true)
-            enableLights(true)
-            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
-        }
-        ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
-    }
+    fun ensureChannel(ctx: Context) = AppNotify.ensureChannel(ctx, CHANNEL)
 
     fun notifyHit(ctx: Context, rule: ImportantRule, body: String) {
         ensureChannel(ctx)
-        val open = PendingIntent.getActivity(
-            ctx, 0,
-            Intent(ctx, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-                putExtra(MainActivity.EXTRA_TAB, MainActivity.TAB_IMPORTANT)
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
 
         // 通知栏只有两行，摘要取「关键字 + 上下文」的第一行（两个关键字合并时也在这一行里），
         // 想看全文就展开通知。彩色 span 在通知里不生效，这里转成纯文本。
         val summary = smsSnippet(body, rule.keywords).firstOrNull()?.toString()
             ?: smsSummary(body)
 
-        val b = Notification.Builder(ctx, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle("重要短信 · ${rule.label}")
-            .setContentText(summary)
-            // 摘要会被截断，展开后看全文
-            .setStyle(Notification.BigTextStyle().bigText(body))
-            .setAutoCancel(true)
-            .setOnlyAlertOnce(false)   // 每来一条都要响，不能被当成"同一通知的更新"
-            .setWhen(System.currentTimeMillis())
-            .setShowWhen(true)
-            .setContentIntent(open)
-
-        try {
-            ctx.getSystemService(NotificationManager::class.java).notify(NOTIF_ID, b.build())
-        } catch (_: SecurityException) {
-            // 用户没授予通知权限：记录照常入库，只是不弹通知
+        AppNotify.post(ctx, CHANNEL.id, NOTIF_ID) { b ->
+            b.setSmallIcon(android.R.drawable.stat_notify_chat)
+                .setContentTitle("重要短信 · ${rule.label}")
+                .setContentText(summary)
+                // 摘要会被截断，展开后看全文
+                .setStyle(Notification.BigTextStyle().bigText(body))
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(false)   // 每来一条都要响，不能被当成"同一通知的更新"
+                .setWhen(System.currentTimeMillis())
+                .setShowWhen(true)
+                .setContentIntent(AppNotify.openApp(ctx, MainActivity.TAB_IMPORTANT))
         }
+        // 没授予通知权限时 AppNotify.post 会吞掉异常：记录照常入库，只是不弹通知
     }
 }
 

@@ -16,6 +16,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import phoenix.smsnotify.common.TimeFmt
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.ToggleView
@@ -194,7 +195,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         } else {
             latestCategory.text = latest.first.label
             latestCategory.setTextColor(Color.BLACK)
-            latestTime.text = ImportantStore.fmtTime(latest.second.time)
+            latestTime.text = TimeFmt.short(latest.second.time)
         }
     }
 
@@ -353,7 +354,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         setPadding(0, dp(7), 0, 0)
 
         addView(TextView(act).apply {
-            text = ImportantStore.fmtTime(hit.time)
+            text = TimeFmt.short(hit.time)
             textSize = 12f
             setTextColor(gray)
         })

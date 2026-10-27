@@ -16,8 +16,12 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import phoenix.smsnotify.common.TimeFmt
 import phoenix.smsnotify.ui.AppColor
+import phoenix.smsnotify.ui.AppIcons
 import phoenix.smsnotify.ui.BaseActivity
+import phoenix.smsnotify.ui.KeepAliveTips
+import phoenix.smsnotify.ui.PathIconView
 import phoenix.smsnotify.ui.pressScale
 import phoenix.smsnotify.ui.rowRipple
 
@@ -45,7 +49,7 @@ class DeliveryPageView(private val act: BaseActivity) : LinearLayout(act) {
 
     private lateinit var adapter: PickupAdapter
     private lateinit var tabs: List<Button>
-    private lateinit var selectBtn: TextView
+    private lateinit var selectBtn: PathIconView
     private lateinit var selectAllBtn: Button
     private lateinit var deleteSelBtn: Button
     private lateinit var actionRow: LinearLayout
@@ -85,12 +89,14 @@ class DeliveryPageView(private val act: BaseActivity) : LinearLayout(act) {
     // ---------------- UI 构建 ----------------
 
     private fun buildUi() {
-        // 标题行：标题 + 选择器入口 + 设置齿轮
+        // 标题行：标题 + 帮助 / 选择 / 设置三个图标（从左到右）
         // 尺寸全部交给 BaseActivity.pageTitle / iconButton，和子页面保持一致
         val titleRow = act.pageTitle("快递取件记录", withBack = false)
-        selectBtn = act.iconButton("☑") { toggleSelectionMode() }
+        // 帮助：随时重看「后台保活」指引（首次安装时是自动弹的，之后从这里进）
+        titleRow.addView(act.iconButton(AppIcons.help()) { KeepAliveTips.showNow(act) })
+        selectBtn = act.iconButton(AppIcons.select()) { toggleSelectionMode() }
         titleRow.addView(selectBtn)
-        titleRow.addView(act.iconButton("⚙") {
+        titleRow.addView(act.iconButton(AppIcons.gear()) {
             act.startActivity(Intent(act, SettingsActivity::class.java))
         })
         addView(titleRow)
@@ -286,7 +292,7 @@ class DeliveryPageView(private val act: BaseActivity) : LinearLayout(act) {
     private fun toggleSelectionMode() {
         selectionMode = !selectionMode
         if (!selectionMode) selected.clear()
-        selectBtn.text = if (selectionMode) "✕" else "☑"
+        selectBtn.icon = if (selectionMode) AppIcons.close() else AppIcons.select()
         if (selectionMode) {
             // 底部操作栏滑入：先藏在下边缘外，再上浮淡入
             // 先 cancel 掉上一轮收起的动画，否则它的 endAction 会把刚显示的栏又设为 GONE
@@ -319,7 +325,7 @@ class DeliveryPageView(private val act: BaseActivity) : LinearLayout(act) {
                 Store.removeAll(selected)
                 selected.clear()
                 selectionMode = false
-                selectBtn.text = "☑"
+                selectBtn.icon = AppIcons.select()
                 actionRow.animate().cancel()
                 actionRow.alpha = 1f
                 actionRow.translationY = 0f
@@ -378,7 +384,7 @@ class DeliveryPageView(private val act: BaseActivity) : LinearLayout(act) {
             (status.background as android.graphics.drawable.GradientDrawable)
                 .setColor(if (r.taken) 0xFF2E7D32.toInt() else 0xFFF9A825.toInt())
 
-            line2.text = Store.fmtTime(r.time)
+            line2.text = TimeFmt.short(r.time)
             line2.textSize = 13f
             line2.setTextColor(gray)
 

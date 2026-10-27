@@ -2,6 +2,7 @@ package phoenix.smsnotify.ui
 
 import android.app.Activity
 import android.graphics.Color
+import android.graphics.Path
 import android.graphics.Typeface
 import android.os.Build
 import android.util.TypedValue
@@ -62,9 +63,6 @@ open class BaseActivity : Activity() {
 
     /** 标题行高度；返回箭头、右侧图标按钮都撑满这个高度 */
     protected val titleRowDp = 40
-
-    /** 标题右侧图标按钮的边长（触摸区，字形居中） */
-    protected val iconButtonDp = 40
 
     /** dp → px */
     internal fun dp(v: Int): Int =
@@ -133,17 +131,27 @@ open class BaseActivity : Activity() {
         return row
     }
 
-    /** 标题行右侧的图标按钮：固定方形触摸区 + 圆形水波纹 + 按压缩放 */
-    internal fun iconButton(glyph: String, onClick: () -> Unit): TextView =
-        TextView(this).apply {
-            text = glyph
-            textSize = titleSp
-            gravity = Gravity.CENTER
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.BLACK)
-            layoutParams = LinearLayout.LayoutParams(dp(iconButtonDp), dp(titleRowDp)).apply {
-                marginStart = dp(4)
-            }
+    /**
+     * 标题行右侧的图标按钮：[AppIcons] 里的描边图标 + 圆形水波纹 + 按压缩放。
+     *
+     * 不做字符图标版本（之前的 ☑、⚙）：字形由系统字体决定，粗细、大小、基线都不受控，
+     * 和底部导航里自绘的图标摆在一起明显不是一套。
+     *
+     * 返回控件本身，方便调用方切换图标（比如多选模式 勾选框 → ✕）：
+     *
+     *     btn.icon = if (on) AppIcons.close() else AppIcons.select()
+     */
+    internal fun iconButton(icon: Path, onClick: () -> Unit): PathIconView =
+        PathIconView(this).apply {
+            this.icon = icon
+            iconColor = AppColor.text
+            // 宽 34dp、横向内边距 6dp：触摸区靠 40dp 的高度撑，横向收窄一点，
+            // 两个图标并排时中间的空隙就只有 6+6=12dp（40dp+9dp 的算法会空出 22dp，
+            // 比一个图标还宽，看着很散）。
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(titleRowDp))
+            // 34dp 触摸区 - 两侧各 6dp = 22dp 图形区
+            val inset = dp(6)
+            setPadding(inset, inset, inset, inset)
             circleRipple()
             pressScale()
             setOnClickListener { onClick() }
