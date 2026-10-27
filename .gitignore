@@ -1,0 +1,51 @@
+# ============================================================
+#  Android / Gradle 项目 .gitignore
+#  原则：凡是「能从源码重新生成」或「只对本机有效」的东西都不入库
+# ============================================================
+
+# ---------- 构建产物 ----------
+# build/ 是递归匹配：根目录的 build/ 和 app/build/ 都会命中
+build/
+.gradle/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 打包产物（能用源码重新编出来，不进仓库）
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ---------- 本机路径配置 ----------
+# local.properties 里是 sdk.dir=D:\Android\android-sdk
+# 换一台机器路径就不同，提交上去只会互相覆盖、互相报错
+local.properties
+
+# ---------- IDE / 系统 ----------
+.idea/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# ---------- 签名密钥（永不入库） ----------
+# 密钥库一旦泄露，任何人都能签出「你的」更新包覆盖用户安装
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# ---------- 本地 AI 会话产物 ----------
+# .workbuddy/ 是本机的开发记忆，跟构建无关；想要团队共享可改为提交
+.workbuddy/
+
+# ============================================================
+#  注意：以下文件必须入库，不要错误地忽略
+#    gradlew / gradlew.bat              构建入口
+#    gradle/wrapper/gradle-wrapper.jar  下载并校验 Gradle 版本（二进制但必须提交）
+#    gradle/wrapper/gradle-wrapper.properties
+#    app/src/main/assets/preset_rules.json  首次安装要播种的内置规则
+# ============================================================

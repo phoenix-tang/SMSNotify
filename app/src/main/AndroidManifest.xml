@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- App 只做一件事：把各功能模块注册到短信分发中心 -->
+    <application
+        android:name=".App"
+        android:label="SMSNotify"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!-- ===== 快递功能（delivery 包） ===== -->
+        <activity android:name=".delivery.MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".delivery.SettingsActivity" android:exported="false" />
+        <activity android:name=".delivery.RulesActivity" android:exported="false" />
+        <activity android:name=".delivery.RuleEditActivity"
+            android:windowSoftInputMode="adjustResize" android:exported="false" />
+
+        <!-- ===== 公共的短信读取层（sms 包）：与具体功能无关 ===== -->
+        <!-- 只允许系统发送该广播，防止第三方伪造取件短信 -->
+        <receiver
+            android:name=".sms.SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>
