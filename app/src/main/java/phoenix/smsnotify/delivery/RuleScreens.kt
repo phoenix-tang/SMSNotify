@@ -90,11 +90,10 @@ class RulesActivity : BaseActivity() {
             val line2 = col.getChildAt(1) as TextView
             val toggle = row.getChildAt(1) as ToggleView
 
-            // 编号 + 名称；内置规则加标记，停用的整行变灰
+            // 编号 + 名称；停用的整行变灰
             line1.text = buildString {
                 append(position + 1).append(". ")
                 append(if (r.name.isEmpty()) "（未命名规则）" else r.name)
-                if (r.builtin) append("（内置）")
             }
             line1.textSize = 17f
             line1.setTextColor(

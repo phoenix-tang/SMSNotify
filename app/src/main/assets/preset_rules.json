@@ -2,7 +2,7 @@
   "version": 1,
   "rules": [
     {
-      "name": "预设规则",
+      "name": "预设规则1",
       "cabPrefix": "",
       "cabSuffix": "号柜",
       "codePrefix": "取件码",

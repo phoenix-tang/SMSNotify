@@ -42,6 +42,9 @@ signing.properties
 # .workbuddy/ 是本机的开发记忆，跟构建无关；想要团队共享可改为提交
 .workbuddy/
 
+# 图标生成用的原始大图（成品已切好放在 res/mipmap-* 里，不需要入库）
+generated-images/
+
 # ============================================================
 #  注意：以下文件必须入库，不要错误地忽略
 #    gradlew / gradlew.bat              构建入口
