@@ -6,7 +6,10 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.text.Editable
+import android.text.Spannable
+import android.text.SpannableString
 import android.text.TextWatcher
+import android.text.style.RelativeSizeSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -25,10 +28,13 @@ import phoenix.smsnotify.ui.rowRipple
 /**
  * 规则相关的两个页面：
  *
- *  - [RulesActivity]     规则列表（编号、开关、长按删除、底部添加）
+ *  - [RulesActivity]     规则列表（开关、长按删除、底部添加）
  *  - [RuleEditActivity]  单条规则的编辑（低代码拼接 → 粘贴短信测试）
  *
  * 两者的数据来源都是 [RuleStore]，放在一个文件里方便对照列表展示和编辑表单的字段。
+ *
+ * 预设规则（[ExtractRule.preset]）与自建规则的权限不同：可停用，但不能进编辑页、不能删除，
+ * 内容随应用更新同步；自建规则完全归用户自己。
  */
 
 /** 规则列表：点击编辑、右侧开关启用/停用、长按删除、底部添加 */
@@ -46,7 +52,8 @@ class RulesActivity : BaseActivity() {
 
         root.addView(pageTitle("关键字提取规则"))
         root.addView(TextView(this).apply {
-            text = "从上到下依次匹配，停用的规则会被跳过。柜架号只取数字，\"号柜\"这类文字填在后缀里。"
+            text = "从上到下依次匹配，前面的规则命中后就不再往下看。" +
+                "预设规则排在前面并随应用更新，只能停用；自己添加的规则排在后面，不会被更新改动。"
             textSize = 13f
             setTextColor(gray)
             setPadding(0, 8, 0, 8)
@@ -90,14 +97,25 @@ class RulesActivity : BaseActivity() {
             val line2 = col.getChildAt(1) as TextView
             val toggle = row.getChildAt(1) as ToggleView
 
-            // 名称；停用的整行变灰。列表里不显示序号——内置规则和自建规则一视同仁，
-            // 顺序的含义（先匹配的优先）由页面顶部的说明交代
-            line1.text = if (r.name.isEmpty()) "（未命名规则）" else r.name
+            // 名称；停用的整行变灰。列表里不显示序号——两种规则视觉一致，
+            // 顺序的含义（先匹配的优先）由页面顶部的说明交代。
+            // 预设规则在名称后加一个小号「预设」标签：它只能停用、不能编辑或删除
+            val label = if (r.name.isEmpty()) "（未命名规则）" else r.name
+            line1.text = if (r.preset) {
+                val s = SpannableString("$label  预设")
+                s.setSpan(
+                    RelativeSizeSpan(0.72f), label.length + 2, s.length,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+                s
+            } else {
+                label
+            }
             line1.textSize = 17f
             line1.setTextColor(
                 when {
                     !r.enabled -> gray
-                    r.builtin -> 0xFF1976D2.toInt()
+                    r.preset -> 0xFF1976D2.toInt()
                     else -> Color.BLACK
                 }
             )
@@ -115,19 +133,28 @@ class RulesActivity : BaseActivity() {
             }
 
             row.setOnClickListener {
+                // 预设规则也能进来，只是页里参数只读、只能用测试框试匹配
                 startActivity(Intent(this@RulesActivity, RuleEditActivity::class.java)
                     .putExtra("id", r.id))
             }
             row.setOnLongClickListener {
-                AlertDialog.Builder(this@RulesActivity)
-                    .setTitle("删除规则")
-                    .setMessage("删除规则「${if (r.name.isEmpty()) "未命名规则" else r.name}」？")
-                    .setPositiveButton("删除") { _, _ ->
-                        RuleStore.remove(r.id)
-                        notifyDataSetChanged()
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
+                if (r.preset) {
+                    Toast.makeText(
+                        this@RulesActivity,
+                        "预设规则随应用更新，不能删除，可以用右侧开关停用",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    AlertDialog.Builder(this@RulesActivity)
+                        .setTitle("删除规则")
+                        .setMessage("删除规则「${if (r.name.isEmpty()) "未命名规则" else r.name}」？")
+                        .setPositiveButton("删除") { _, _ ->
+                            RuleStore.remove(r.id)
+                            notifyDataSetChanged()
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                }
                 true
             }
             return row
@@ -155,13 +182,16 @@ class RulesActivity : BaseActivity() {
     }
 }
 
-/** 规则编辑页：低代码拼接 → 生成正则 → 实时测试 */
+/** 规则编辑页：低代码拼接 → 粘贴短信实时测试。预设规则的参数只读，测试框照常可用 */
 class RuleEditActivity : BaseActivity() {
 
     private var ruleId = -1L
 
-    /** 进页面时的原始规则，保存时用它保留 builtin / enabled 这类界面没有的字段 */
+    /** 进页面时的原始规则，保存时用它保留 enabled 这类界面没有的字段 */
     private var origin: ExtractRule? = null
+
+    /** 预设规则：参数只读，不显示保存/删除，但测试框照用 */
+    private var readOnly = false
 
     private val gray = 0xFF9E9E9E.toInt()
 
@@ -180,6 +210,7 @@ class RuleEditActivity : BaseActivity() {
         ruleId = intent.getLongExtra("id", -1L)
         val rule = if (ruleId >= 0) RuleStore.find(ruleId) else null
         origin = rule
+        readOnly = rule?.preset == true
 
         // 统一页面骨架：左右 16dp、上下 8dp 视觉留白，系统栏高度自动避让
         val root = pageRoot()
@@ -188,19 +219,21 @@ class RuleEditActivity : BaseActivity() {
         root.addView(pageTitle(
             when {
                 rule == null -> "添加规则"
-                rule.builtin -> "编辑内置规则"
+                readOnly -> "查看预设规则"
                 else -> "编辑规则"
             }
         ))
 
-        if (rule?.builtin == true) {
+        if (readOnly) {
             root.addView(TextView(this).apply {
-                text = "这条规则来自内置文件，和其他规则一样可以改参数、停用或删除。"
+                text = "预设规则随应用更新：参数只读，不能修改或删除，只能回列表用开关停用（自己添加的规则不受影响）。" +
+                    "下面可以粘贴短信试匹配。"
                 textSize = 13f
                 setTextColor(0xFF1976D2.toInt())
                 setPadding(0, 4, 0, 4)
             })
         }
+
 
         // 规则名称
         root.addView(label("规则名称"))
@@ -241,32 +274,43 @@ class RuleEditActivity : BaseActivity() {
         }
         root.addView(testResult)
 
-        // 保存 / 删除（内置规则同样可以删除）
-        val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        btnRow.addView(Button(this).apply {
-            text = "保存"
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            pressScale(0.97f)
-            setOnClickListener { save() }
-        })
-        if (rule != null) {
+        // 预设规则：参数框去掉输入能力（长按仍可复制），测试框不动，物尽其用
+        if (readOnly) {
+            listOf(nameEdit, cabPrefix, cabSuffix, codePrefix, codeSuffix).forEach { et ->
+                et.keyListener = null          // 不接收任何键盘输入
+                et.isCursorVisible = false
+                et.showSoftInputOnFocus = false
+            }
+        }
+
+        // 保存 / 删除：预设规则没有可保存的字段，也不给删除入口
+        if (!readOnly) {
+            val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             btnRow.addView(Button(this).apply {
-                text = "删除"
+                text = "保存"
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 pressScale(0.97f)
-                setOnClickListener {
-                    AlertDialog.Builder(this@RuleEditActivity)
-                        .setTitle("删除规则")
-                        .setMessage("确定删除该规则？")
-                        .setPositiveButton("删除") { _, _ ->
-                            RuleStore.remove(ruleId); finish()
-                        }
-                        .setNegativeButton("取消", null)
-                        .show()
-                }
+                setOnClickListener { save() }
             })
+            if (rule != null) {
+                btnRow.addView(Button(this).apply {
+                    text = "删除"
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    pressScale(0.97f)
+                    setOnClickListener {
+                        AlertDialog.Builder(this@RuleEditActivity)
+                            .setTitle("删除规则")
+                            .setMessage("确定删除该规则？")
+                            .setPositiveButton("删除") { _, _ ->
+                                RuleStore.remove(ruleId); finish()
+                            }
+                            .setNegativeButton("取消", null)
+                            .show()
+                    }
+                })
+            }
+            root.addView(btnRow)
         }
-        root.addView(btnRow)
 
         // 表单页放进可滚动容器：键盘弹出时滚动区会变矮，内容不会被键盘盖住
         setContentView(scrollPage(root))
@@ -287,9 +331,9 @@ class RuleEditActivity : BaseActivity() {
         id = ruleId, name = nameEdit.text.toString().trim(),
         cabPrefix = cabPrefix.text.toString(), cabSuffix = cabSuffix.text.toString(),
         codePrefix = codePrefix.text.toString(), codeSuffix = codeSuffix.text.toString(),
-        // 界面没有这两项，沿用进页面时的值，避免保存时把「已停用」悄悄改回启用
+        // 界面没有 enabled / preset，沿用进页面时的值，避免保存时把「已停用」悄悄改回启用
         enabled = origin?.enabled ?: true,
-        builtin = origin?.builtin ?: false
+        preset = origin?.preset ?: false
     )
 
     private fun updateTest() {

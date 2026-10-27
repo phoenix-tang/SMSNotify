@@ -21,14 +21,19 @@ import java.util.regex.Pattern
 /** 一条提取规则：柜架号 / 取件码各自的字面量前后缀 */
 data class ExtractRule(
     val id: Long,
-    val name: String,        // 规则名称
+    val name: String,        // 规则名称。预设规则用它当唯一标识，所以预设的名称不可改
     val cabPrefix: String,   // 柜架号前缀（字面量）
     val cabSuffix: String,   // 柜架号后缀（字面量）
     val codePrefix: String,  // 取件码前缀（字面量）
     val codeSuffix: String,  // 取件码后缀（字面量）
     val enabled: Boolean = true,
-    /** 由内置文件播种而来，只用于列表上标注「内置」；可修改、可删除、可停用 */
-    val builtin: Boolean = false
+    /**
+     * true = 预设规则：名称和四个字段由 assets/preset_rules.json 提供，**只读**，
+     * 每次启动按 [name] 与文件对齐（只能停用/启用，[enabled] 会被保留）。
+     *
+     * false = 自建规则：完全归用户，编辑、删除、改名都随意，**永不随应用更新变化**。
+     */
+    val preset: Boolean = false
 )
 
 /** 提取规则的存储与匹配（低代码拼接 → 正则） */
@@ -36,10 +41,13 @@ object RuleStore {
     private const val FILE = "rules.json"
 
     /**
-     * 内置规则文件（assets/preset_rules.json）。
-     * 它只负责「首次安装时播种」：导入后规则就变成普通规则，有自己的编号，
-     * 可以在界面上改参数、停用、删除，之后不再与这个文件保持联动。
-     * 文件里的 `version` 用于以后新增内置规则时做增量补种。
+     * 预设规则文件（assets/preset_rules.json）。
+     *
+     * 它是预设规则的**唯一权威来源**：每次 [init] 都按名称与本地比对一次，
+     * 文件里改了什么，装着新版应用的用户就会得到什么；文件里删掉的规则，
+     * 本地对应的预设规则也随之消失。用户自建规则完全不受这个过程影响。
+     *
+     * 本地只保存预设规则的**启用状态**，字段以文件为准。
      */
     private const val SEED_ASSET = "preset_rules.json"
 
@@ -47,15 +55,18 @@ object RuleStore {
     private var nextId = 1L
     private var file: File? = null
 
-    /** 已经播种过的内置文件版本号 */
-    private var seededVersion = 0
+    /** 老数据里靠 builtin 推断出来的预设规则，名称可能是旧文案，需要用位置兜底认领新名字 */
+    private val legacyIds = mutableSetOf<Long>()
+
+    /** 读到的是旧格式（有 presetKey / builtin / seedVersion），同步完顺手把文件重写成新格式 */
+    private var needsRewrite = false
 
     fun init(ctx: Context) {
         if (file != null) return
         file = File(ctx.filesDir, FILE)
         if (file!!.exists()) load()
-        seedFromAsset(ctx)
-        normalizeOrder()
+        syncPresets(ctx)
+        if (normalizeOrder()) persist()   // 顺序被调整过就落盘，免得每次启动都要重排
     }
 
     // ---------- 读写 ----------
@@ -65,9 +76,7 @@ object RuleStore {
             val text = file!!.readText()
             val arr: JSONArray
             if (text.trimStart().startsWith("{")) {
-                val root = JSONObject(text)
-                seededVersion = root.optInt("seedVersion", 0)
-                arr = root.optJSONArray("rules") ?: JSONArray()
+                arr = JSONObject(text).optJSONArray("rules") ?: JSONArray()
             } else {
                 arr = JSONArray(text)      // 老格式：纯数组
             }
@@ -80,6 +89,18 @@ object RuleStore {
                 } else if (id >= nextId) {
                     nextId = id + 1
                 }
+                val key = o.optString("presetKey", "")
+                // preset 字段是本版；presetKey 是上一版；builtin 是更早的版本
+                val preset = when {
+                    o.has("preset") -> o.optBoolean("preset", false)
+                    key.isNotEmpty() -> true
+                    else -> o.optBoolean("builtin", false)
+                }
+                // 没有 preset 字段说明是老数据，名称可能是旧文案，同步时要按位置认领新名字
+                if (preset && !o.has("preset")) {
+                    legacyIds.add(id)
+                    needsRewrite = true
+                }
                 rules.add(
                     ExtractRule(
                         id = id,
@@ -89,88 +110,135 @@ object RuleStore {
                         codePrefix = o.optString("codePrefix", ""),
                         codeSuffix = o.optString("codeSuffix", ""),
                         enabled = o.optBoolean("enabled", true),
-                        builtin = o.optBoolean("builtin", false)
+                        preset = preset
                     )
                 )
             }
         } catch (_: Exception) { }
     }
 
-    /** 从内置文件读取规则；文件缺失或格式错误返回 null */
-    private fun readSeedAsset(ctx: Context): Pair<Int, List<ExtractRule>>? = try {
+    /** 从预设文件读取规则；文件缺失或格式错误返回 null */
+    private fun readSeedAsset(ctx: Context): List<ExtractRule>? = try {
         val text = ctx.assets.open(SEED_ASSET).bufferedReader().use { it.readText() }
-        val root = JSONObject(text)
-        val arr = root.optJSONArray("rules") ?: JSONArray()
-        val list = (0 until arr.length()).map { i ->
+        val arr = JSONObject(text).optJSONArray("rules") ?: JSONArray()
+        (0 until arr.length()).mapNotNull { i ->
             val o = arr.getJSONObject(i)
+            val name = o.optString("name", "")
+            if (name.isEmpty()) return@mapNotNull null   // 名称就是标识，没名字的条目无法同步
             ExtractRule(
                 id = 0L,
-                name = o.optString("name", "内置规则"),
+                name = name,
                 cabPrefix = o.optString("cabPrefix", ""),
                 cabSuffix = o.optString("cabSuffix", ""),
                 codePrefix = o.optString("codePrefix", ""),
                 codeSuffix = o.optString("codeSuffix", ""),
                 enabled = o.optBoolean("enabled", true),
-                builtin = true
+                preset = true
             )
-        }
-        root.optInt("version", 1) to list
+        }.distinctBy { it.name }
     } catch (_: Exception) { null }
 
-    /** 首次安装（或内置文件版本升级）时把内置规则导入成普通规则 */
-    private fun seedFromAsset(ctx: Context) {
-        val (version, builtinRules) = readSeedAsset(ctx) ?: return
-        if (version <= seededVersion) return
+    /**
+     * 把本地预设规则和预设文件对齐。**每次启动都跑**，幂等。
+     *
+     * 三条规则：
+     * 1. 老数据（builtin/presetKey 时代）的名称可能已经过时：名称对不上文件时，
+     *    按位置认领一个还没被占用的预设；认领不到说明该预设已被移除，丢弃。
+     * 2. 按名称同步字段：名称和四个前后缀一律以文件为准，只保留本地的 id 和启用状态。
+     * 3. 文件里有、本地没有的 → 以默认值插入；本地有、文件里已删掉的 → 删除。
+     *
+     * 自建规则（preset=false）全程不参与，永不被覆盖或删除。
+     */
+    private fun syncPresets(ctx: Context) {
+        val presets = readSeedAsset(ctx) ?: return   // 读不到就别动本地，避免误删预设
+        if (presets.isEmpty()) return
+        val byName = presets.associateBy { it.name }
         var changed = false
-        for (b in builtinRules) {
-            // 按名字去重：用户删掉的内置规则不会被悄悄塞回来（除非文件版本升级）
-            if (rules.none { it.name == b.name }) {
-                rules.add(b.copy(id = nextId++))
+
+        // 1) 老数据改名：按位置认领文件里还没被占用的名称
+        val claimed = rules.filter { it.preset }.map { it.name }.toMutableSet()
+        for (i in rules.indices) {
+            val r = rules[i]
+            if (!r.preset || byName.containsKey(r.name) || r.id !in legacyIds) continue
+            val hit = presets.firstOrNull { it.name !in claimed } ?: continue
+            claimed.add(hit.name)
+            rules[i] = hit.copy(id = r.id, enabled = r.enabled)
+            changed = true
+        }
+
+        // 2) 按名称同步字段（保留 id 与启用状态），并删掉文件里已不存在的预设
+        val synced = ArrayList<ExtractRule>(rules.size + presets.size)
+        for (r in rules) {
+            if (!r.preset) {
+                synced.add(r)
+                continue
+            }
+            val b = byName[r.name]
+            if (b == null) {
+                changed = true            // 新版本的预设文件删掉了这条预设
+                continue
+            }
+            val merged = b.copy(id = r.id, enabled = r.enabled)
+            if (merged != r) changed = true
+            synced.add(merged)
+        }
+
+        // 3) 新增文件里有、本地没有的预设
+        for (b in presets) {
+            if (synced.none { it.preset && it.name == b.name }) {
+                synced.add(b.copy(id = nextId++))
                 changed = true
             }
         }
-        seededVersion = version
-        if (changed || !file!!.exists()) persist()
+
+        if (changed || needsRewrite) {
+            rules.clear()
+            rules.addAll(synced)
+            persist()
+        }
     }
 
     private fun persist() {
         val arr = JSONArray()
         rules.forEach { arr.put(toJson(it)) }
-        file?.writeText(
-            JSONObject().put("seedVersion", seededVersion).put("rules", arr).toString()
-        )
+        file?.writeText(JSONObject().put("rules", arr).toString())
     }
 
     private fun toJson(r: ExtractRule): JSONObject = JSONObject()
         .put("id", r.id).put("name", r.name)
         .put("cabPrefix", r.cabPrefix).put("cabSuffix", r.cabSuffix)
         .put("codePrefix", r.codePrefix).put("codeSuffix", r.codeSuffix)
-        .put("enabled", r.enabled).put("builtin", r.builtin)
+        .put("enabled", r.enabled).put("preset", r.preset)
 
     // ---------- 增删改查 ----------
 
-    /** 列表顺序 = 匹配顺序：自定义规则在前（先匹配），内置规则兜底排在最后 */
+    /** 列表顺序 = 匹配顺序：预设规则在前，自建规则按添加顺序排在后面 */
     fun all(): List<ExtractRule> = rules.toList()
 
     fun find(id: Long): ExtractRule? = rules.find { it.id == id }
 
+    /** 保存编辑结果。预设规则是只读的，这里直接忽略——界面本来就不给入口，防一层误调 */
     fun save(r: ExtractRule) {
         val idx = rules.indexOfFirst { it.id == r.id }
         if (idx >= 0) {
-            // 保留原来的 builtin 标记，避免编辑内置规则后被当成自定义规则
-            rules[idx] = r.copy(id = r.id, builtin = rules[idx].builtin)
+            if (rules[idx].preset) return
+            rules[idx] = r.copy(id = r.id, preset = false)
         } else {
-            rules.add(r.copy(id = nextId++, builtin = false))
+            rules.add(r.copy(id = nextId++, preset = false))
         }
         normalizeOrder()
         persist()
     }
 
+    /** 删除规则。预设规则删不掉，只能停用（[setEnabled]），它随应用更新而来 */
     fun remove(id: Long) {
-        if (rules.removeAll { it.id == id }) persist()
+        val r = rules.find { it.id == id } ?: return
+        if (r.preset) return
+        rules.remove(r)
+        persist()
     }
 
-    /** 开关切换：只改 enabled，不动其他字段 */
+    /** 开关切换：只改 enabled，不动其他字段。预设规则唯一允许的修改 */
     fun setEnabled(id: Long, enabled: Boolean) {
         val idx = rules.indexOfFirst { it.id == id }
         if (idx < 0 || rules[idx].enabled == enabled) return
@@ -178,14 +246,18 @@ object RuleStore {
         persist()
     }
 
-    /** 内置规则永远排在自定义规则之后 */
-    private fun normalizeOrder() {
-        if (rules.size < 2) return
-        val custom = rules.filter { !it.builtin }
-        val builtin = rules.filter { it.builtin }
+    /**
+     * 预设规则排在前面，自建规则按添加顺序跟在后面（新建的永远在最后）。
+     * 返回是否真的调整过顺序。
+     */
+    private fun normalizeOrder(): Boolean {
+        val preset = rules.filter { it.preset }
+        val custom = rules.filter { !it.preset }
+        val ordered = preset + custom
+        if (ordered == rules) return false
         rules.clear()
-        rules.addAll(custom)
-        rules.addAll(builtin)
+        rules.addAll(ordered)
+        return true
     }
 
     // ---------- 拼接正则 ----------
@@ -262,7 +334,7 @@ object RuleStore {
  * 停用的规则跳过。所有规则都被停用或删光时就不再解析 —— 这样界面上的开关才是有意义的，
  * 也不会出现「关了开关还在记录」的困惑。
  *
- * 原先这里还有一套硬编码的兜底解析（"号柜" + 取件码的启发式），已并入内置规则，
+ * 原先这里还有一套硬编码的兜底解析（"号柜" + 取件码的启发式），已并入预设规则，
  * 规则列表就是全部的解析逻辑。
  */
 object PickupParser {
