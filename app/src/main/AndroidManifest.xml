@@ -7,7 +7,7 @@
     <!-- App 只做一件事：把各功能模块注册到短信分发中心 -->
     <application
         android:name=".App"
-        android:label="SMSNotify"
+        android:label="短信提醒助手"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

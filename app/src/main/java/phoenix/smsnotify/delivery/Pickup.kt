@@ -115,8 +115,6 @@ object Store {
     }
 
     fun countPending(): Int = records.count { !it.taken }
-    fun latestPending(): PickupRecord? = records.filter { !it.taken }.maxByOrNull { it.time }
-    fun latest(): PickupRecord? = records.maxByOrNull { it.time }
 
     fun fmtTime(t: Long): String = fmt.format(Date(t))
 
@@ -134,7 +132,7 @@ object Store {
     }
 }
 
-/** 常驻通知：未取数 + 最新一条，点击进入快递列表 */
+/** 常驻通知：只报未取数量，点击进入快递列表 */
 object NotifyHelper {
     private const val CHANNEL_ID = "deliveries"
     private const val NOTIF_ID = 1001
@@ -152,7 +150,6 @@ object NotifyHelper {
     fun update(ctx: Context) {
         ensureChannel(ctx)
         val pending = Store.countPending()
-        val latest = Store.latestPending() ?: Store.latest()
 
         val open = PendingIntent.getActivity(
             ctx, 0,
@@ -168,10 +165,9 @@ object NotifyHelper {
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
 
-        if (latest != null) {
+        if (pending > 0) {
             b.setContentTitle("未取快递 $pending 件")
-            // 柜架号可能解析不到，用 summary 自动省略，避免出现「菜鸟  · 取件码」这种多余空格
-            b.setContentText("${latest.summary} · 取件码 ${latest.code}（${Store.fmtTime(latest.time)}）")
+            b.setContentText("点击查看取件码")
         } else {
             b.setContentTitle("快递取件助手")
             b.setContentText("暂无待取快递，收到取件短信后会自动记录")

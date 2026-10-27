@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.regex.Pattern
 
 /**
  * 规则的「数据 + 逻辑」层，界面在 [RulesActivity] / [RuleEditActivity] 里。
@@ -190,36 +191,27 @@ object RuleStore {
     // ---------- 拼接正则 ----------
 
     /** 柜架号：只捕获数字，"号柜"这类文字交给后缀字段（后缀是字面量，不进捕获组） */
-    const val CAB_CAPTURE = "(\\d+)"
+    private const val CAB_CAPTURE = "(\\d+)"
     /** 取件码：数字，可含连字符，如 205936 / 3-2-5016 */
-    const val CODE_CAPTURE = "((?:\\d+-)*\\d{3,})"
-    /** 前缀和取值之间通常夹着几个字，如"取件码为205936"里的"为" */
-    const val GAP = "[^0-9]{0,4}"
+    private const val CODE_CAPTURE = "((?:\\d+-)*\\d{3,})"
 
-    fun cabinetPattern(r: ExtractRule): String =
-        prefixPart(r.cabPrefix) + CAB_CAPTURE + lit(r.cabSuffix)
+    private fun cabinetPattern(r: ExtractRule): String =
+        lit(r.cabPrefix) + CAB_CAPTURE + lit(r.cabSuffix)
 
-    fun codePattern(r: ExtractRule): String =
-        prefixPart(r.codePrefix) + CODE_CAPTURE + lit(r.codeSuffix)
-
-    /** 字面量转义；前缀后面允许少量非数字间隔 */
-    private fun prefixPart(p: String): String = if (p.isEmpty()) "" else lit(p) + GAP
+    private fun codePattern(r: ExtractRule): String =
+        lit(r.codePrefix) + CODE_CAPTURE + lit(r.codeSuffix)
 
     /**
-     * 只转义真正的正则元字符。
-     * 不用 Regex.escape/Pattern.quote —— 它们会把每个字面量包成 \Q号柜\E，预览页读起来很乱；
-     * 中文和普通字符本身在正则里没有特殊含义，原样输出即可，预览就是 `(\d+)号柜`。
+     * 把用户输入整体转成字面量，**一个字都不当作正则解释**。
+     *
+     * 用 [Pattern.quote]（`\Q...\E`）而不是逐字符挑元字符转义：它是正则里的「引号」，
+     * 对任意字符都成立，连 `\` 和 `\E` 自身也不会漏；逐字符转义总有遗漏的可能，
+     * 一旦漏掉就是 PatternSyntaxException 或语义跑偏，而界面上没有任何地方能看到正则，
+     * 用户只会遇到「规则莫名其妙不生效」。
+     *
+     * 规则里唯一的正则片段是上面两个捕获组，由代码写死，用户碰不到。
      */
-    private fun lit(s: String): String {
-        if (s.isEmpty()) return ""
-        val meta = "\\^$.|?*+()[]{}"
-        val sb = StringBuilder(s.length + 4)
-        for (c in s) {
-            if (c in meta) sb.append('\\')
-            sb.append(c)
-        }
-        return sb.toString()
-    }
+    private fun lit(s: String): String = if (s.isEmpty()) "" else Pattern.quote(s)
 
     // ---------- 匹配 ----------
 

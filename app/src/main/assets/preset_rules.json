@@ -5,7 +5,7 @@
       "name": "预设规则1",
       "cabPrefix": "",
       "cabSuffix": "号柜",
-      "codePrefix": "取件码",
+      "codePrefix": "取件码为",
       "codeSuffix": "",
       "enabled": true
     }

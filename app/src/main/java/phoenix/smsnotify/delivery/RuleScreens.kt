@@ -26,7 +26,7 @@ import phoenix.smsnotify.ui.rowRipple
  * 规则相关的两个页面：
  *
  *  - [RulesActivity]     规则列表（编号、开关、长按删除、底部添加）
- *  - [RuleEditActivity]  单条规则的编辑（低代码拼接 → 实时预览正则 → 粘贴短信测试）
+ *  - [RuleEditActivity]  单条规则的编辑（低代码拼接 → 粘贴短信测试）
  *
  * 两者的数据来源都是 [RuleStore]，放在一个文件里方便对照列表展示和编辑表单的字段。
  */
@@ -90,11 +90,9 @@ class RulesActivity : BaseActivity() {
             val line2 = col.getChildAt(1) as TextView
             val toggle = row.getChildAt(1) as ToggleView
 
-            // 编号 + 名称；停用的整行变灰
-            line1.text = buildString {
-                append(position + 1).append(". ")
-                append(if (r.name.isEmpty()) "（未命名规则）" else r.name)
-            }
+            // 名称；停用的整行变灰。列表里不显示序号——内置规则和自建规则一视同仁，
+            // 顺序的含义（先匹配的优先）由页面顶部的说明交代
+            line1.text = if (r.name.isEmpty()) "（未命名规则）" else r.name
             line1.textSize = 17f
             line1.setTextColor(
                 when {
@@ -172,7 +170,6 @@ class RuleEditActivity : BaseActivity() {
     private lateinit var cabSuffix: EditText
     private lateinit var codePrefix: EditText
     private lateinit var codeSuffix: EditText
-    private lateinit var regexPreview: TextView
     private lateinit var testInput: EditText
     private lateinit var testResult: TextView
 
@@ -231,15 +228,6 @@ class RuleEditActivity : BaseActivity() {
             codeSuffix = codeRow.getChildAt(2) as EditText
         })
 
-        // 生成正则预览
-        root.addView(label("生成的正则（自动拼接，无需手写）"))
-        regexPreview = TextView(this).apply {
-            textSize = 13f
-            setTextColor(0xFF1976D2.toInt())
-            setTypeface(Typeface.MONOSPACE)
-        }
-        root.addView(regexPreview)
-
         // 测试区
         root.addView(label("测试（粘贴一条真实短信试试）"))
         testInput = EditText(this).apply {
@@ -283,16 +271,16 @@ class RuleEditActivity : BaseActivity() {
         // 表单页放进可滚动容器：键盘弹出时滚动区会变矮，内容不会被键盘盖住
         setContentView(scrollPage(root))
 
-        // 任意输入变化 → 更新正则预览 + 测试结果
+        // 任意输入变化 → 重跑测试
         val watcher = object : TextWatcher {
-            override fun afterTextChanged(s: Editable?) = updatePreview()
+            override fun afterTextChanged(s: Editable?) = updateTest()
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
         }
         listOf(nameEdit, cabPrefix, cabSuffix, codePrefix, codeSuffix, testInput).forEach {
             it.addTextChangedListener(watcher)
         }
-        updatePreview()
+        updateTest()
     }
 
     private fun currentRule(): ExtractRule = ExtractRule(
@@ -304,34 +292,30 @@ class RuleEditActivity : BaseActivity() {
         builtin = origin?.builtin ?: false
     )
 
-    private fun updatePreview() {
+    private fun updateTest() {
         val r = currentRule()
-
-        // 两个正则各自独立，不是一个拼起来的长正则
-        val cabNote = if (r.cabPrefix.isEmpty() && r.cabSuffix.isEmpty()) {
-            "\n  ⚠ 柜架号前后缀都为空时，会取到短信里第一个数字，建议至少填一个"
-        } else {
-            "\n  （可选，匹配不到不影响取件码）"
-        }
-        regexPreview.text = buildString {
-            append("① 柜架号: ").append(RuleStore.cabinetPattern(r)).append(cabNote)
-            append("\n② 取件码: ").append(RuleStore.codePattern(r)).append("\n  （必需）")
-            append("\n两条正则各自在原文上找，不是拼成一条长正则")
-        }
-
         val sample = testInput.text.toString()
         if (sample.isEmpty()) {
             testResult.text = ""
             return
         }
+
         val m = RuleStore.matchOne(r, sample)
-        testResult.text = if (m != null) {
-            val cab = if (m.first.isEmpty()) "（未匹配到，可以没有）" else m.first
-            "✔ 匹配成功　柜架号: $cab　取件码: ${m.second}"
-        } else {
-            "✘ 未匹配，请检查取件码前缀/后缀是否与短信原文一致"
+        if (m == null) {
+            testResult.text = "✘ 未匹配，请检查取件码前缀/后缀是否与短信原文一致"
+            testResult.setTextColor(0xFFC62828.toInt())
+            return
         }
-        testResult.setTextColor(if (m != null) 0xFF2E7D32.toInt() else 0xFFC62828.toInt())
+
+        val cab = if (m.first.isEmpty()) "（未匹配到，可以没有）" else m.first
+        testResult.text = buildString {
+            append("✔ 匹配成功　柜架号: ").append(cab).append("　取件码: ").append(m.second)
+            // 柜架号前后缀都为空时，柜号退化成"取第一个数字"，容易抓到错误的数字，这里提醒一句
+            if (r.cabPrefix.isEmpty() && r.cabSuffix.isEmpty()) {
+                append("\n⚠ 柜架号前后缀都是空的，会取到短信里第一个数字，建议至少填一个")
+            }
+        }
+        testResult.setTextColor(0xFF2E7D32.toInt())
     }
 
     private fun save() {
