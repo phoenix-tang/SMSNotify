@@ -62,6 +62,14 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     /** 哪几条规则是展开的（只在本次运行内记住，重建页面不会丢，但重启后默认全部收起） */
     private val expanded = mutableSetOf<Long>()
 
+    /**
+     * 被收起的「旧条件」记录组，key = `规则id:条件指纹`。
+     *
+     * 只记用户主动收起来的那些：默认一律展开 —— 把旧记录藏起来，很容易让人以为
+     * 改关键字的时候记录被清掉了。
+     */
+    private val collapsedOldGroups = mutableSetOf<String>()
+
     /** 命中记录的左滑删除状态：同一时刻只允许一条记录露出删除按钮 */
     private val hitSwipe = SwipeGroup()
 
@@ -69,6 +77,9 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     private lateinit var latestHeader: TextView
     private lateinit var latestCategory: TextView
     private lateinit var latestTime: TextView
+
+    /** 平时显示的最新一条摘要（一行）；响铃时让位给 [ringExcerptBox]，避免同一段话写两遍 */
+    private lateinit var latestPreview: TextView
 
     /** 响铃时才出现：摘要区和停止键，包在 [latestRingBox] 里一起显隐 */
     private lateinit var latestRingBox: LinearLayout
@@ -187,6 +198,15 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         }
         latestCard.addView(latestCategory)
 
+        // 平时也露一行摘要：刚收到一条短信时最想知道它说了什么，
+        // 以前只有响铃的那一刻看得到，铃声一停就只剩规则名了
+        latestPreview = act.paragraph("", topDp = 3).apply {
+            visibility = GONE
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        latestCard.addView(latestPreview)
+
         // 摘要 + 停止键：平时整块 GONE，只在响铃时出现
         latestRingBox = LinearLayout(act).apply {
             orientation = VERTICAL
@@ -240,6 +260,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         latestHeader.setCardHeader("最新通知")
         latestTime.setRowMeta("", color = AppColor.blueMuted)
         latestRingBox.visibility = GONE
+        latestPreview.visibility = GONE
         stopRingTicker()
 
         val latest = ImportantStore.latest()
@@ -248,6 +269,15 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         } else {
             latestCategory.setCardTitle(latest.first.label)
             latestTime.text = TimeFmt.short(latest.second.time)
+            // 摘要只取第一行（多段时第二段是小字补充，最新栏里放不下也不必放）。
+            // 上色同样用记录自己的关键字快照，规则后来改过条件也不会标错
+            val line = latest.second.excerpt.split('\n').firstOrNull { it.isNotEmpty() }
+            if (line != null) {
+                latestPreview.text = highlightKeywords(
+                    line, latest.second.keywords.ifEmpty { latest.first.keywords }
+                )
+                latestPreview.visibility = VISIBLE
+            }
         }
     }
 
@@ -259,6 +289,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         latestTime.setRowMeta(ringElapsed(subject.since), color = AppColor.redText)
 
         latestRingBox.visibility = VISIBLE
+        latestPreview.visibility = GONE   // 摘要由 ringExcerptBox 完整显示，别写两遍
         ringExcerptBox.removeAllViews()
         val lines = subject.excerpt.split('\n').filter { it.isNotEmpty() }.take(2)
         if (lines.isEmpty()) {
@@ -392,10 +423,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
                 setPadding(dp(24), 0, 0, dp(2))
             })
         } else {
-            hitList.forEachIndexed { i, hit ->
-                if (i > 0) content.addView(act.divider(topMarginDp = 7))
-                content.addView(buildHitRow(hit, rule))
-            }
+            addHitGroups(content, hitList, rule)
         }
 
         card.addView(header)
@@ -441,6 +469,94 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     }
 
     /**
+     * 命中记录按「捕获条件」分组渲染。
+     *
+     * 记录只存摘要、不存原文，所以改了规则关键字也不会重算旧摘要 —— 那些旧摘要里的词
+     * 已经不在当前条件里了，和新的混在一起看，会让人以为它们是按今天的规则记下来的。
+     *
+     * 所以当前条件捕获的排最上（没有组头，和以前完全一样），旧条件捕获的收在
+     * 「旧条件：余额、到账 · 2 条」下面，点组头可以收起。改过两次就是两组旧条件、
+     * 各一个组头，不需要"版本号"这种东西；当前条件还没抓到新短信时，顶部会明说一句。
+     */
+    private fun addHitGroups(content: LinearLayout, hits: List<ImportantHit>, rule: ImportantRule) {
+        val currentKey = conditionKey(rule.keywords)
+        // hits 已按时间倒序，所以 LinkedHashMap 里的每组也天然是倒序
+        val groups = LinkedHashMap<String, MutableList<ImportantHit>>()
+        hits.forEach { h ->
+            // 快照为空只会在规则已被删掉这种理论状态下出现，按当前条件兜底
+            val key = if (h.keywords.isEmpty()) currentKey else conditionKey(h.keywords)
+            groups.getOrPut(key) { mutableListOf() } += h
+        }
+
+        // 刚改过条件、还没抓到新的：明说一句，否则用户只看到一堆"旧条件"，会以为新条件没生效
+        if (currentKey !in groups) {
+            content.addView(TextView(act).apply {
+                setRowMeta("当前条件还没有新记录")
+                setPadding(0, dp(6), 0, 0)
+            })
+        }
+
+        // 当前组排最前；其余组按各自最新一条的时间倒序
+        val ordered = groups.entries.sortedWith(
+            compareByDescending<Map.Entry<String, List<ImportantHit>>> { it.key == currentKey }
+                .thenByDescending { it.value.first().time }
+        )
+
+        ordered.forEachIndexed { index, entry ->
+            if (index > 0) content.addView(act.divider(topMarginDp = 7))
+
+            val body = LinearLayout(act).apply { orientation = VERTICAL }
+            entry.value.forEachIndexed { i, hit ->
+                if (i > 0) body.addView(act.divider(topMarginDp = 7))
+                body.addView(buildHitRow(hit, rule))
+            }
+
+            // 当前条件那组不加组头：它就是这张卡片的主视图
+            if (entry.key == currentKey) {
+                content.addView(body)
+                return@forEachIndexed
+            }
+
+            val collapseKey = "${rule.id}:${entry.key}"
+            val collapsed = collapseKey in collapsedOldGroups
+            body.visibility = if (collapsed) View.GONE else View.VISIBLE
+
+            val arrow = TextView(act).apply {
+                setDisclosure(!collapsed, dimmed = true)
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(dp(18), ViewGroup.LayoutParams.WRAP_CONTENT)
+            }
+            val words = entry.value.first().keywords
+            val label = TextView(act).apply {
+                setRowMeta("旧条件：${words.take(3).joinToString("、")}" +
+                    (if (words.size > 3) "…" else "") + " · ${entry.value.size} 条")
+                // 关键字是用户自己写的一句话，可能很长：给它剩余宽度并省略，
+                // 否则这一行会顶出卡片右边界
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            content.addView(LinearLayout(act).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(6), 0, dp(1))
+                isClickable = true
+                addView(arrow)
+                addView(label)
+                setOnClickListener {
+                    // 就地切换，不整页重建：重建立刻丢掉滚动位置，长列表里很难受
+                    val open = body.visibility != View.VISIBLE
+                    body.visibility = if (open) View.VISIBLE else View.GONE
+                    arrow.setDisclosure(open, dimmed = true)
+                    if (open) collapsedOldGroups.remove(collapseKey)
+                    else collapsedOldGroups.add(collapseKey)
+                }
+            })
+            content.addView(body)
+        }
+    }
+
+    /**
      * 一条命中记录：第一行是接收时间，下面是「关键词 + 前后各 10 字」的摘要。
      *
      *     10-27 21:35
@@ -448,11 +564,13 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
      *
      * 摘要有两个关键字且彼此间隔较远时会占两行；间隔不超过 20 字则合并成一行。
      * 切分发生在**入库时**（见 [smsExcerpt]），这里只负责把存下来的文字按关键字重新上色 ——
-     * 原文不入库，所以改了规则关键字也不会影响已有记录的内容。
+     * 上色用的是这条记录自己的关键字快照（[ImportantHit.keywords]），不是规则今天的条件，
+     * 否则规则改过关键字后，旧摘要会漏标当年的词、又误标新加的词。
      *
      * 整行套一层 [SwipeRow]：左滑露出删除按钮，和快递列表是同一套交互与动画。
      */
     private fun buildHitRow(hit: ImportantHit, rule: ImportantRule): View {
+        val marks = hit.keywords.ifEmpty { rule.keywords }
         val content = LinearLayout(act).apply {
             orientation = VERTICAL
             setPadding(0, dp(7), 0, 0)
@@ -468,7 +586,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
                 })
             } else {
                 lines.forEach { line ->
-                    addView(act.paragraph(highlightKeywords(line, rule.keywords), topDp = 2).apply {
+                    addView(act.paragraph(highlightKeywords(line, marks), topDp = 2).apply {
                         // 摘要已经做过裁剪，正常一行放得下；窄屏换行时最多两行
                         maxLines = 2
                         ellipsize = android.text.TextUtils.TruncateAt.END

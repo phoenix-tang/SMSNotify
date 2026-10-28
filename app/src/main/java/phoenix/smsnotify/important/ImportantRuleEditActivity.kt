@@ -201,8 +201,17 @@ class ImportantRuleEditActivity : BaseActivity() {
             Toast.makeText(this, "请至少填一段匹配文字，否则这条规则匹配不到任何短信", Toast.LENGTH_LONG).show()
             return
         }
+
+        // 改了捕获条件：已有记录是旧关键字裁出来的，保存后会归到「旧条件」组里。
+        // 先把这件事说清楚 —— 否则用户回到列表发现记录"换了组"，第一反应是数据丢了
+        val prev = origin
+        val conditionsChanged = prev != null && !sameConditions(prev.keywords, rule.keywords)
+        val oldHits = prev?.let { ImportantStore.hitCount(it.id) } ?: 0
+
         ImportantStore.save(rule)
-        Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
+        val msg = if (conditionsChanged && oldHits > 0) "已保存 · 早先的 $oldHits 条记录归入旧条件"
+        else "已保存"
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         finish()
     }
 

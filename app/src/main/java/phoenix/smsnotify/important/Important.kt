@@ -69,7 +69,19 @@ data class ImportantHit(
     val sender: String,
     /** 已裁好的摘要：关键字前后各 10 字，最多两段，段间用 `\n` 分隔 */
     val excerpt: String,
-    val time: Long
+    val time: Long,
+    /**
+     * 这条摘要**是被哪几个关键字裁出来的**，入库时的快照。
+     *
+     * 光有摘要说不清"为什么会被记下来"：规则后来改了关键字，摘要里的旧词就不再是
+     * 当前条件的一部分。存一份快照，界面才能
+     *  - 按当时的词给关键字上色（而不是按今天的关键字，那样会漏标或误标）；
+     *  - 把"当前条件捕获的"和"旧条件捕获的"分开显示（见 [ImportantPageView]）。
+     *
+     * 老数据没有这个字段时，读盘会补成"那一刻规则的关键字"（见 [ImportantStore.init]），
+     * 所以空列表只可能出现在"规则已被删掉"这种理论状态下，显示时按当前规则兜底处理。
+     */
+    val keywords: List<String> = emptyList()
 )
 
 /** 规则 + 命中记录的持久化与匹配（JSON 文件放在应用私有目录，随卸载删除） */
@@ -148,7 +160,12 @@ object ImportantStore {
                         ruleId = ruleId,
                         sender = o.optString("sender", ""),
                         excerpt = excerpt,
-                        time = o.optLong("time", 0L)
+                        time = o.optLong("time", 0L),
+                        // 老数据没有快照：补成"此刻这条规则的关键字"，也就是升级那一刻的条件。
+                        // 不补的话，这些记录在用户下次改关键字时会被当成"新条件捕获的"，
+                        // 混进当前组里，反而更说不清来历
+                        keywords = o.optJSONArray("keywords").toStringList()
+                            .ifEmpty { find(ruleId)?.keywords.orEmpty() }
                     )
                 )
                 if (id >= nextHitId) nextHitId = id + 1
@@ -176,6 +193,7 @@ object ImportantStore {
                 JSONObject()
                     .put("id", h.id).put("ruleId", h.ruleId)
                     .put("sender", h.sender).put("excerpt", h.excerpt).put("time", h.time)
+                    .put("keywords", JSONArray(h.keywords))
             )
         }
         file?.writeText(JSONObject().put("rules", rArr).put("hits", hArr).toString())
@@ -275,7 +293,7 @@ object ImportantStore {
         }
         if (dup) return false
 
-        hits.add(ImportantHit(nextHitId++, rule.id, sender, excerpt, now))
+        hits.add(ImportantHit(nextHitId++, rule.id, sender, excerpt, now, rule.keywords))
         // 超出上限按时间淘汰最旧的
         val ofRule = hits.filter { it.ruleId == rule.id }
         if (ofRule.size > MAX_HITS_PER_RULE) {
@@ -286,6 +304,24 @@ object ImportantStore {
         return true
     }
 }
+
+/**
+ * 一套关键字的「条件指纹」：给命中记录分组用。
+ *
+ * 顺序和大小写都不算改动（匹配本来就是 ignoreCase，而 AND 与顺序无关），
+ * 所以先小写、去重、排序再拼起来。拿它当 Map 的 key，同一套条件必然落进同一组。
+ */
+internal fun conditionKey(keywords: List<String>): String =
+    keywords.map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+        .distinct().sorted().joinToString("\u0000")
+
+/** 两套关键字在语义上是否相同（只改了顺序或大小写不算改动） */
+internal fun sameConditions(a: List<String>, b: List<String>): Boolean =
+    conditionKey(a) == conditionKey(b)
+
+/** JSON 数组 → 字符串列表：null 当空数组，顺带滤掉空白段 */
+private fun JSONArray?.toStringList(): List<String> =
+    (0 until (this?.length() ?: 0)).map { this!!.optString(it, "") }.filter { it.isNotBlank() }
 
 /** 短信正文压成一行摘要：没有命中的关键字时（理论不该发生）用它兜底 */
 fun smsSummary(body: String, max: Int = 60): String {
