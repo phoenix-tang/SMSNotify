@@ -14,7 +14,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import phoenix.smsnotify.common.TimeFmt
-import phoenix.smsnotify.ui.actionButton
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.AppIcons
 import phoenix.smsnotify.ui.BaseActivity
@@ -32,6 +31,7 @@ import phoenix.smsnotify.ui.setCardTitle
 import phoenix.smsnotify.ui.setDisclosure
 import phoenix.smsnotify.ui.setRowMeta
 import phoenix.smsnotify.ui.setRowTitle
+import phoenix.smsnotify.ui.stopDot
 import phoenix.smsnotify.ui.tagLabel
 
 /**
@@ -77,11 +77,13 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     private lateinit var latestCategory: TextView
     private lateinit var latestTime: TextView
 
+    /** 停止圆点。竖直跨「时长行 + 规则名」两行，只在这张卡片响铃时出现 */
+    private lateinit var latestStop: View
+
     /** 平时显示的最新一条摘要（一行）；响铃时让位给 [ringExcerptBox]，避免同一段话写两遍 */
     private lateinit var latestPreview: TextView
 
-    /** 响铃时才出现：摘要区和停止键，包在 [latestRingBox] 里一起显隐 */
-    private lateinit var latestRingBox: LinearLayout
+    /** 响铃时才出现的完整摘要（最多两段），平时 GONE */
     private lateinit var ringExcerptBox: LinearLayout
 
     private lateinit var scroll: ScrollView
@@ -184,18 +186,43 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
             setCardHeader("最新通知")
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        latestCard.addView(LinearLayout(act).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(latestHeader)
-            addView(latestTime)
-        })
 
         latestCategory = TextView(act).apply {
             setCardTitle("")
             setPadding(0, dp(3), 0, 0)
+            // 圆点要「跨两行」，前提是这里真的只有两行：名字再长也不能折
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
-        latestCard.addView(latestCategory)
+
+        // 左列：表头行 + 规则名。停止圆点摆在列外、竖直跨这两行 ——
+        // 它停的是「这条规则」，对准的应该是这两行组成的整块信息，而不是某一行
+        val head = LinearLayout(act).apply {
+            orientation = VERTICAL
+            addView(LinearLayout(act).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(latestHeader)
+                addView(latestTime)
+            })
+            addView(latestCategory)
+        }
+
+        // 热区 42 而不是 Material 建议的 48：这块区域本身只有 41.8dp 高（两行合计），
+        // 48 会把卡片头部撑高；而圆的视觉直径已经有 38，手指落在圆附近基本都在热区里
+        latestStop = act.stopDot(sizeDp = 38, touchDp = 42) { stopRinging(act) }.apply {
+            visibility = GONE
+            layoutParams = LinearLayout.LayoutParams(dp(42), dp(42)).apply {
+                marginStart = dp(8)
+            }
+        }
+
+        latestCard.addView(LinearLayout(act).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(head, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(latestStop)
+        })
 
         // 平时也露一段摘要：刚收到一条短信时最想知道它说了什么，
         // 以前只有响铃的那一刻看得到，铃声一停就只剩规则名了
@@ -206,22 +233,12 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         }
         latestCard.addView(latestPreview)
 
-        // 摘要 + 停止键：平时整块 GONE，只在响铃时出现
-        latestRingBox = LinearLayout(act).apply {
+        // 响铃时换成完整摘要（最多两段），平时整块 GONE
+        ringExcerptBox = LinearLayout(act).apply {
             orientation = VERTICAL
             visibility = GONE
         }
-        ringExcerptBox = LinearLayout(act).apply { orientation = VERTICAL }
-        latestRingBox.addView(ringExcerptBox)
-
-        latestRingBox.addView(
-            act.actionButton("停止响铃", danger = true) { stopRinging(act) }.apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(6) }
-            }
-        )
-        latestCard.addView(latestRingBox)
+        latestCard.addView(ringExcerptBox)
 
         return latestCard
     }
@@ -257,8 +274,10 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
 
         latestCard.background = act.roundedBg(AppColor.blueBg, 12)
         latestHeader.setCardHeader("最新通知")
+        latestTime.visibility = VISIBLE
         latestTime.setRowMeta("", color = AppColor.blueMuted)
-        latestRingBox.visibility = GONE
+        latestStop.visibility = GONE
+        ringExcerptBox.visibility = GONE
         latestPreview.visibility = GONE
         stopRingTicker()
 
@@ -286,12 +305,17 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
 
     private fun renderRinging(subject: RingSubject) {
         latestCard.background = act.roundedBg(AppColor.redBg, 12)
-        latestHeader.setCardHeader("正在响铃", color = AppColor.redText)
+        // 时长直接顶到原来「正在响铃」的位置：卡片本身就是红底、右上角还挂着红圆点，
+        // 再写四个字是重复。放到左边之后第一行只剩它一个元素，右边缘不必再给圆点让位 ——
+        // 左侧那条线（时长 / 规则名 / 摘要）因此是齐的，不会出现两条右对齐线
+        latestHeader.setCardHeader(subject.elapsedText(), color = AppColor.redText)
         latestCategory.setCardTitle(subject.title)
-        latestTime.setRowMeta(subject.elapsedText(), color = AppColor.redText)
+        // 时长已经占了表头位，右上角那个时间戳跟着让位，别在圆点左边再挤一个
+        latestTime.visibility = GONE
+        latestStop.visibility = VISIBLE
 
-        latestRingBox.visibility = VISIBLE
         latestPreview.visibility = GONE   // 摘要由 ringExcerptBox 完整显示，别写两遍
+        ringExcerptBox.visibility = VISIBLE
         ringExcerptBox.removeAllViews()
         val lines = subject.excerpt.split('\n').filter { it.isNotEmpty() }.take(2)
         if (lines.isEmpty()) {
@@ -320,7 +344,8 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
                     renderLatest()
                     return
                 }
-                latestTime.text = subject.elapsedText()
+                // 只换文字、不复用 setCardHeader：每秒重设一遍字号/字重/颜色没意义
+                latestHeader.text = subject.elapsedText()
                 postDelayed(this, 1_000)
             }
         }

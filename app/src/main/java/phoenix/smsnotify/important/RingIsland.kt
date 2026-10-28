@@ -12,7 +12,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.OvershootInterpolator
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import phoenix.smsnotify.MainActivity
@@ -22,6 +21,7 @@ import phoenix.smsnotify.ui.PathIconView
 import phoenix.smsnotify.ui.dpi
 import phoenix.smsnotify.ui.pressScale
 import phoenix.smsnotify.ui.roundedBg
+import phoenix.smsnotify.ui.stopDot
 
 // TODO(系统状态栏胶囊): 等 Android 16 普及、且主流 ROM 都实现 promoted 渲染之后，
 //  这里可以整段换成系统自己画的胶囊，届时不再需要悬浮窗权限。已实测可行的做法：
@@ -241,25 +241,13 @@ object RingIsland {
             }
             addView(clock)
 
-            addView(stopButton(ctx))
+            // 30dp 是胶囊的上限：整条才 44dp 高，再大就把上下内边距吃光了
+            addView(ctx.stopDot(30) { stopRinging(ctx) }.apply {
+                layoutParams = LinearLayout.LayoutParams(ctx.dpi(30), ctx.dpi(30)).apply {
+                    marginStart = ctx.dpi(8)
+                }
+            })
         }
-
-    /** 右侧停止键：红色圆底 + 白色圆角方块（比字符「■」可控，不受系统字体影响） */
-    private fun stopButton(ctx: Context): View = FrameLayout(ctx).apply {
-        background = ctx.roundedBg(AppColor.islandStop, 15)
-        contentDescription = "停止响铃"
-        isClickable = true
-        isFocusable = true
-        pressScale(0.88f)
-        layoutParams = LinearLayout.LayoutParams(ctx.dpi(30), ctx.dpi(30)).apply {
-            marginStart = ctx.dpi(8)
-        }
-        addView(View(ctx).apply {
-            background = ctx.roundedBg(AppColor.islandText, 1)
-            layoutParams = FrameLayout.LayoutParams(ctx.dpi(10), ctx.dpi(10), Gravity.CENTER)
-        })
-        setOnClickListener { stopRinging(ctx) }
-    }
 
     /**
      * 打开 App 看这条短信。

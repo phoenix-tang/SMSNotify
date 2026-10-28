@@ -11,10 +11,12 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.DecelerateInterpolator
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.cos
@@ -294,6 +296,53 @@ fun Context.statusDot(text: String, color: Int, sizeDp: Int = 26): TextView = Te
     }
     layoutParams = LinearLayout.LayoutParams(dpi(sizeDp), dpi(sizeDp)).apply {
         marginEnd = dpi(10)
+    }
+}
+
+/**
+ * 「停止响铃」的红色圆点：圆底 + 白色圆角方块居中。
+ *
+ * 用图形而不是字符「■」：符号的粗细和大小由字体决定，换个系统字体就变形；自己画的话
+ * 方块大小、圆角、圆的直径都能按容器调。
+ *
+ * 胶囊和 App 里的响铃卡片共用这一个 —— 两处说的是同一件事（停掉正在响的这条），
+ * 长得不一样用户就得学两遍。直径按各处容器高度传：胶囊整条才 44dp 高，用 30；
+ * 卡片头部两行合计 41.8dp，用 38。
+ *
+ * @param sizeDp  圆的视觉直径
+ * @param touchDp 触摸热区边长。大于 [sizeDp] 时用一圈透明留白补足，圆本身不放大 ——
+ *                热区要够大（Material 的最小值是 48dp），但视觉上 48dp 的圆放在 18sp
+ *                标题旁边会喧宾夺主，所以这两件事分开控制。
+ */
+fun Context.stopDot(sizeDp: Int, touchDp: Int = sizeDp, onClick: () -> Unit): View {
+    val circle = FrameLayout(this).apply {
+        // 圆角给半径就是正圆
+        background = roundedBg(AppColor.islandStop, sizeDp / 2)
+        // 方块 = 直径的 1/3、圆角 = 方块厚度的 1/10：30dp 时正好是原来硬编码的
+        // 10dp 方块 + 1dp 圆角，放大到 38dp 会按比例一起长
+        val block = dpi(sizeDp / 3)
+        addView(View(this@stopDot).apply {
+            background = roundedBg(AppColor.islandText, sizeDp / 30)
+            layoutParams = FrameLayout.LayoutParams(block, block, Gravity.CENTER)
+        })
+    }
+
+    // 热区比圆大时套一层透明容器，把多出来的边距摊在圆的四周
+    val host = if (touchDp > sizeDp) {
+        FrameLayout(this).apply {
+            addView(circle, FrameLayout.LayoutParams(dpi(sizeDp), dpi(sizeDp), Gravity.CENTER))
+        }
+    } else {
+        circle
+    }
+
+    return host.apply {
+        // 图标本身没有文字，读屏只能靠这一句
+        contentDescription = "停止响铃"
+        isClickable = true
+        isFocusable = true
+        pressScale(0.88f)
+        setOnClickListener { onClick() }
     }
 }
 
