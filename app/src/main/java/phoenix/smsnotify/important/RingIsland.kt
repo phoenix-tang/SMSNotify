@@ -10,10 +10,8 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.view.animation.AccelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -25,6 +23,19 @@ import phoenix.smsnotify.ui.PathIconView
 import phoenix.smsnotify.ui.dpi
 import phoenix.smsnotify.ui.pressScale
 import phoenix.smsnotify.ui.roundedBg
+
+// TODO(系统状态栏胶囊): 等 Android 16 普及、且主流 ROM 都实现 promoted 渲染之后，
+//  这里可以整段换成系统自己画的胶囊，届时不再需要悬浮窗权限。已实测可行的做法：
+//  manifest 声明 android.permission.POST_PROMOTED_NOTIFICATIONS（普通权限，装完即 granted，不审核），
+//  通知 setOngoing(true) + ProgressStyle + extras 里塞
+//  "android.requestPromotedOngoing" = true 与 "android.shortCriticalText"（chip 上那三五个字），
+//  SystemUI 就会在状态栏正中画出胶囊，并自己把信号、电量图标让到两侧（HyperOS 3 真机验过）。
+//  现在不换的原因：① chip 只认 shortCriticalText，setUsesChronometer 无效，做不出「已响 00:12」；
+//  ② 没有就地停止键，只能点 chip 跳进 App 才能停；③ Android 15 及以下没有这套 API，
+//  而 Android 16 的 AOSP 模拟器镜像同样不实现（同一条通知 flags 只有 ONGOING_EVENT、状态栏空白）。
+//  真要换时是「启动时探测一次、一次性分派」——有就全程用系统胶囊，没有就全程用本文件的悬浮窗，
+//  尤其不要在运行中来回切换形态：应用查不到 chip 到底有没有被画出来，切过去而没画出来，
+//  屏幕上就真的什么都没有了，而铃声还在响。
 
 /**
  * 响铃胶囊：屏幕未锁定时浮在顶部的一条，形如
@@ -44,25 +55,17 @@ import phoenix.smsnotify.ui.roundedBg
  *  - 需要「显示在其他应用上层」权限，没授权时 [show] 直接返回 false，
  *    退化成通知栏那条（见 [ImportantNotify]），不会静默出现「什么都没发生」。
  *
- * 两种形态（模仿系统闹钟的灵动岛）：
- *  - **展开**：上面那条横条，带规则名、已响时长和停止键；
- *  - **收起**：顶部正中一个 34dp 的小圆点（居中悬浮窗，正好落在屏幕中轴、
- *    也就是多数手机前置摄像头挖孔的位置），点一下再展开。
+ * 浮出后**一直待到响铃结束或被按停，不收起来、不变形态**。曾经做过「点窗口外或超时
+ * 缩成 34dp 小圆点、点一下再展开」的那一套，动机是模仿系统灵动岛；但各家的岛都要
+ * 场景审批，我们进不去，那个圆点就只剩「多一个状态要维护」，而且铃声还在响、屏幕上
+ * 却只剩一个小圆点，比横条更让人困惑。少一个状态，也就少一类收尾回调打架的 bug。
  *
- * 什么时候收：**点了窗口外面**（悬浮窗不抢焦点，唯一能感知到"用户去忙别的了"的信号
- * 就是 `FLAG_WATCH_OUTSIDE_TOUCH` 送来的 `ACTION_OUTSIDE`），或者展开 [AUTO_COLLAPSE_MS]
- * 没人理 —— 系统横幅也是这么自己退场的。收起后铃声照旧、通知栏那条也还在，
- * 所以任何形态下都有停下来的路。
- *
- * 点击分三处：整条点一下 = 打开 App 看这条短信（`MainActivity.onResume` 里会顺手停响）；
- * 右侧红点 = 只停响，不离开当前应用；收起后的小圆点 = 重新展开。
+ * 点击分两处：整条点一下 = 打开 App 看这条短信（`MainActivity.onResume` 里会顺手停响）；
+ * 右侧红点 = 只停响，不离开当前应用。
  */
 object RingIsland {
 
     private const val TAG = "RingIsland"
-
-    /** 展开后多久没人碰就缩回小圆点。和系统横幅的退场节奏接近，别一直占着屏幕 */
-    private const val AUTO_COLLAPSE_MS = 6_000L
 
     /** 所有操作都在主线程：加/删窗口、跑动画、刷计时都要求有 Looper */
     private val handler = Handler(Looper.getMainLooper())
@@ -71,17 +74,9 @@ object RingIsland {
     private var host: WindowManager? = null
     private var pill: View? = null
 
-    /** 展开态（横条）与收起态（小圆点），同一个窗口里只显示一个 */
-    private var bar: View? = null
-    private var dot: View? = null
-
     private var clock: TextView? = null
     private var ticker: Runnable? = null
-    private var collapseTask: Runnable? = null
     private var startedAt = 0L
-
-    /** 当前是不是收起状态。窗口重建后由 [show] 复位成展开 */
-    private var collapsed = false
 
     /** 有没有「显示在其他应用上层」权限。没有就只能在通知栏里提醒 */
     fun canShow(ctx: Context): Boolean = try {
@@ -110,11 +105,9 @@ object RingIsland {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // 不抢焦点（不挡输入法、不接管返回键）+ 点击落在胶囊外时交给下面的应用
-            // + 但仍然把那次"点在外面"告诉我们 —— 收起成小圆点就靠它触发
+            // 不抢焦点（不挡输入法、不接管返回键）+ 窗口以外的点击交给下面的应用
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -132,7 +125,6 @@ object RingIsland {
 
         host = wm
         pill = view
-        expandNow()
         startClock()
 
         // 从中间「长出来」：缩放 + 淡入，比直接出现更像系统自己的胶囊
@@ -147,12 +139,11 @@ object RingIsland {
     }
 
     /**
-     * 收起胶囊。
+     * 移除胶囊。
      *
      * @param now true = 立刻移除（换内容时用，避免上一条的退场动画和新的一条打架）
      */
     fun hide(now: Boolean = false) {
-        cancelAutoCollapse()
         ticker?.let { handler.removeCallbacks(it) }
         ticker = null
         clock = null
@@ -161,9 +152,6 @@ object RingIsland {
         val wm = host
         pill = null
         host = null
-        bar = null
-        dot = null
-        collapsed = false
 
         if (now || wm == null) {
             removeQuietly(wm, view)
@@ -183,104 +171,6 @@ object RingIsland {
             // 进程被杀后窗口已被系统回收，这里再删会抛 IllegalArgument，忽略即可
             Log.d(TAG, "removeView：$e")
         }
-    }
-
-    // ---------------- 展开 / 收起 ----------------
-
-    /** 立刻切到展开态（新弹出来时用，不要动画） */
-    private fun expandNow() {
-        collapsed = false
-        bar?.let {
-            it.visibility = View.VISIBLE
-            it.alpha = 1f
-        }
-        dot?.let {
-            it.visibility = View.GONE
-            it.alpha = 1f
-            it.scaleX = 1f
-            it.scaleY = 1f
-        }
-        armAutoCollapse()
-    }
-
-    /**
-     * 展开：小圆点淡出，横条淡入。
-     *
-     * 窗口是 `WRAP_CONTENT`，横条一显示窗口就跟着变大 —— 这一下"长大"本身就是动画的一部分，
-     * 所以内容只做透明度，不再叠缩放（缩放已经给按压缩放用了，两套抢同一个属性会打架）。
-     */
-    private fun expand() {
-        if (!collapsed) return
-        collapsed = false
-        val barView = bar ?: return
-        val dotView = dot ?: return
-
-        dotView.animate().cancel()
-        dotView.animate().alpha(0f).scaleX(0.5f).scaleY(0.5f)
-            .setDuration(110)
-            .withEndAction { dotView.visibility = View.GONE }
-            .start()
-
-        barView.visibility = View.VISIBLE
-        barView.alpha = 0f
-        barView.animate().alpha(1f).setDuration(190).start()
-
-        armAutoCollapse()
-    }
-
-    /**
-     * 收起：横条淡出，然后换成小圆点带一点回弹地出现。
-     *
-     * 两段是分开的而不是交叉的：窗口在横条隐藏的那一刻就会缩到 34dp，
-     * 若让两者同时动，会看到横条被"截断"一下；横条先消失，用户看到的就只是
-     * "它缩回顶部去了"。
-     */
-    private fun collapse() {
-        if (collapsed) return
-        val barView = bar ?: return
-        val dotView = dot ?: return
-        collapsed = true
-        cancelAutoCollapse()
-        Log.i(TAG, "collapse")
-
-        // 万一 110ms 内刚展开过，先把小圆点那半截动画掐掉再直接藏起来：
-        // 留着会压在横条上，留着它的收尾回调则会在收起后把圆点设成 GONE（屏幕变空）
-        dotView.animate().cancel()
-        dotView.visibility = View.GONE
-        dotView.alpha = 1f
-        dotView.scaleX = 1f
-        dotView.scaleY = 1f
-        barView.animate().cancel()
-        barView.animate().alpha(0f)
-            .setDuration(130)
-            .setInterpolator(AccelerateInterpolator())
-            .withEndAction {
-                barView.visibility = View.GONE
-                barView.alpha = 1f
-                // 淡出期间又被展开（点了外面之后立刻点回来）就不要再把它换掉了
-                if (!collapsed) return@withEndAction
-                dotView.visibility = View.VISIBLE
-                dotView.alpha = 0f
-                dotView.scaleX = 0.4f
-                dotView.scaleY = 0.4f
-                dotView.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                    .setDuration(220)
-                    .setInterpolator(OvershootInterpolator(1.4f))
-                    .start()
-            }
-            .start()
-    }
-
-    private fun armAutoCollapse() {
-        cancelAutoCollapse()
-        val task = Runnable { collapse() }
-        collapseTask = task
-        handler.postDelayed(task, AUTO_COLLAPSE_MS)
-    }
-
-    private fun cancelAutoCollapse() {
-        collapseTask?.let { handler.removeCallbacks(it) }
-        collapseTask = null
     }
 
     /** 每秒刷一次「已响多久」，让用户判断还要不要继续听 */
@@ -305,27 +195,7 @@ object RingIsland {
 
     // ---------------- 视图 ----------------
 
-    private fun build(ctx: Context, text: String): View {
-        val root = IslandRoot(ctx)
-        val barView = buildBar(ctx, text)
-        val dotView = buildDot(ctx)
-
-        bar = barView
-        dot = dotView
-        root.addView(barView, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT
-        ))
-        // 小圆点定死 34dp：窗口缩到它本身的大小，位置才会正对屏幕中轴
-        root.addView(dotView, FrameLayout.LayoutParams(
-            ctx.dpi(34), ctx.dpi(34), Gravity.CENTER
-        ))
-
-        // 「点了别处」= 用户去忙别的了，把横条收成小圆点，别继续压在屏幕上
-        root.onOutside = { collapse() }
-        return root
-    }
-
-    private fun buildBar(ctx: Context, text: String): View =
+    private fun build(ctx: Context, text: String): View =
         LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -366,38 +236,6 @@ object RingIsland {
             addView(stopButton(ctx))
         }
 
-    /**
-     * 收起态的小圆点：34dp 的深色圆 + 铃铛 + 右上角一个红点。
-     *
-     * 尺寸按"比前置摄像头挖孔略大一点"定的 —— 手机上它正好套在屏幕中轴的挖孔上，
-     * 看起来就是系统自己的灵动岛；没有挖孔的设备上则是一个悬浮的圆形小标。
-     * 红点的作用是「收起来以后也看得出还在响」，不然会像个普通图标。
-     */
-    private fun buildDot(ctx: Context): View =
-        FrameLayout(ctx).apply {
-            background = ctx.roundedBg(AppColor.island, 17)
-            contentDescription = "重要短信响铃中，点一下展开"
-            isClickable = true
-            isFocusable = true
-            pressScale(0.88f)
-            setOnClickListener { expand() }
-            visibility = View.GONE
-
-            addView(PathIconView(ctx).apply {
-                icon = AppIcons.bell()
-                iconColor = AppColor.islandText
-                layoutParams = FrameLayout.LayoutParams(ctx.dpi(16), ctx.dpi(16), Gravity.CENTER)
-            })
-            addView(View(ctx).apply {
-                background = ctx.roundedBg(AppColor.islandStop, 3)
-                layoutParams = FrameLayout.LayoutParams(ctx.dpi(7), ctx.dpi(7)).apply {
-                    gravity = Gravity.TOP or Gravity.END
-                    topMargin = ctx.dpi(4)
-                    marginEnd = ctx.dpi(4)
-                }
-            })
-        }
-
     /** 右侧停止键：红色圆底 + 白色圆角方块（比字符「■」可控，不受系统字体影响） */
     private fun stopButton(ctx: Context): View = FrameLayout(ctx).apply {
         background = ctx.roundedBg(AppColor.islandStop, 15)
@@ -413,25 +251,6 @@ object RingIsland {
             layoutParams = FrameLayout.LayoutParams(ctx.dpi(10), ctx.dpi(10), Gravity.CENTER)
         })
         setOnClickListener { stopRinging(ctx) }
-    }
-
-    /**
-     * 窗口根视图，只为一件事存在：接住「点了窗口外面」。
-     *
-     * `FLAG_WATCH_OUTSIDE_TOUCH` 只会在窗口外层被按下时送一个 `ACTION_OUTSIDE`，
-     * 它不会把触摸截走（底下那个应用照样收到），所以这里处理完直接返回 true 即可。
-     */
-    private class IslandRoot(ctx: Context) : FrameLayout(ctx) {
-
-        var onOutside: (() -> Unit)? = null
-
-        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-            if (ev.action == MotionEvent.ACTION_OUTSIDE) {
-                onOutside?.invoke()
-                return true
-            }
-            return super.dispatchTouchEvent(ev)
-        }
     }
 
     /**

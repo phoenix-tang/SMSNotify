@@ -48,7 +48,7 @@ class AboutActivity : BaseActivity() {
         root.addView(appTitle("短信提醒助手"))
 
         root.addView(footNote(
-            "版本 ${AppInfo.versionName(this@AboutActivity)}（${AppInfo.versionCode(this@AboutActivity)}）",
+            "版本 ${AppInfo.versionName(this@AboutActivity)}",
             textSp = 13f, topDp = 4, bottomDp = 0
         ))
 
