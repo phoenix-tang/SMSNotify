@@ -74,6 +74,21 @@ fun View.pressScale(pressedScale: Float = 0.94f): View {
     return this
 }
 
+/**
+ * 圆角纯色背景（可带 1dp 描边）。
+ *
+ * 卡片、浅蓝信息块、悬浮胶囊都要「圆角 + 纯色」，之前是各自 new 一个 GradientDrawable
+ * 再手算 `dp(r).toFloat()`。这里统一按 dp 收参，调用方不用再碰像素。
+ *
+ * @param stroke 描边色，null = 不描边（描边固定 1dp）
+ */
+fun Context.roundedBg(fill: Int, radiusDp: Int, stroke: Int? = null): GradientDrawable =
+    GradientDrawable().apply {
+        cornerRadius = dpi(radiusDp).toFloat()
+        setColor(fill)
+        if (stroke != null) setStroke(dpi(1), stroke)
+    }
+
 /** 圆形水波纹，用于方形图标按钮。会替换 background（这类按钮本来也没有背景） */
 fun View.circleRipple(color: Int = RIPPLE_COLOR): View {
     val mask = GradientDrawable().apply {

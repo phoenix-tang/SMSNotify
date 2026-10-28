@@ -83,4 +83,21 @@ object AppColor {
 
     /** 琥珀色：快递「未取」状态圆标的底色（文字用白色，对比度 2.1:1 但上面是符号不是正文） */
     val amber = 0xFFF9A825.toInt()
+
+    // ---------------- 响铃胶囊（悬浮在其他应用上层的那条） ----------------
+    // 它不铺在白页面上，而是压在任意背景（桌面、聊天、相册）之上，
+    // 所以不能沿用 [surface] + [text] 这套「白底黑字」：唯一在任何背景上都读得清的
+    // 做法是自带深底 + 白字。这四档只给 [phoenix.smsnotify.important.RingIsland] 用。
+
+    /** 胶囊底色（近黑，但仍留一点灰，看着像实体而不是纯黑块） */
+    val island = 0xFF1C1C1E.toInt()
+
+    /** 胶囊上的主文字（规则名） */
+    val islandText = 0xFFFFFFFF.toInt()
+
+    /** 胶囊上的次要文字（已响时长） */
+    val islandSub = 0xB3FFFFFF.toInt()
+
+    /** 胶囊右侧的停止键底色 */
+    val islandStop = 0xFFFF453A.toInt()
 }

@@ -6,7 +6,6 @@ import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -26,6 +25,7 @@ import phoenix.smsnotify.ui.emptyHint
 import phoenix.smsnotify.ui.pageHint
 import phoenix.smsnotify.ui.paragraph
 import phoenix.smsnotify.ui.rowRipple
+import phoenix.smsnotify.ui.roundedBg
 import phoenix.smsnotify.ui.setCardHeader
 import phoenix.smsnotify.ui.setCardTitle
 import phoenix.smsnotify.ui.setDisclosure
@@ -133,7 +133,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     private fun buildLatestCard(): View {
         val card = LinearLayout(act).apply {
             orientation = VERTICAL
-            background = rounded(AppColor.blueBg, null, 12)
+            background = act.roundedBg(AppColor.blueBg, 12)
             setPadding(dp(14), dp(11), dp(14), dp(12))
             isClickable = true
             isFocusable = true
@@ -205,7 +205,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
 
         val card = LinearLayout(act).apply {
             orientation = VERTICAL
-            background = rounded(Color.WHITE, AppColor.cardBorder, 12)
+            background = act.roundedBg(Color.WHITE, 12, AppColor.cardBorder)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = dp(10) }
@@ -443,11 +443,4 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
             start()
         }
     }
-
-    private fun rounded(fill: Int, stroke: Int?, radiusDp: Int): GradientDrawable =
-        GradientDrawable().apply {
-            cornerRadius = dp(radiusDp).toFloat()
-            setColor(fill)
-            if (stroke != null) setStroke(dp(1), stroke)
-        }
 }

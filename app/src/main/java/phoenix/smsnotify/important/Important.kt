@@ -419,6 +419,10 @@ private fun snippetLine(body: String, from: Int, to: Int): String {
  *
  * 拆成两条渠道是没得选的（一条渠道一个声音策略），好处是用户在系统设置里能分别看懂
  * 「普通提醒」和「长响提醒」各自会不会响。
+ *
+ * 另有一条 `important_sms_ring_island`：**胶囊已经浮出来时**才用。它和上一条同样静音，
+ * 唯一区别是重要性降到 DEFAULT —— 横幅（heads-up）只有 HIGH 才会弹。这样屏幕上只会
+ * 出现胶囊一处提示，通知栏那条照样留着「停止响铃」。
  */
 object ImportantNotify {
     /**
@@ -452,6 +456,25 @@ object ImportantNotify {
         lights = true
     )
 
+    /**
+     * 胶囊浮在屏幕上时用的「不弹横幅」版本。
+     *
+     * 唯一的关键是 `IMPORTANCE_DEFAULT`：**横幅只有 HIGH 才会弹**。降一档之后通知
+     * 照旧进通知栏、照旧带「停止响铃」，只是不再从顶部盖下来 —— 否则它会正好压在胶囊上，
+     * 而且"重要短信在响"这件事在屏幕上说了两遍。
+     *
+     * 为什么要单独建一条渠道而不是给单条通知加个开关：横幅是**渠道级**属性，
+     * `setSilent(true)` 只压声音，压不住没有 heads-up 这件事。
+     */
+    private val ISLAND_CHANNEL = AppNotify.ChannelSpec(
+        id = "important_sms_ring_island",
+        name = "重要短信提醒 · 顶部胶囊",
+        description = "顶部浮出胶囊时使用：不弹横幅，只在通知栏留一条带「停止响铃」的提醒",
+        importance = NotificationManager.IMPORTANCE_DEFAULT,
+        silent = true,
+        lights = true
+    )
+
     internal const val NOTIF_ID = 2002   // 固定 id：后到的覆盖前一条，连收几条不会堆满通知栏
 
     private const val ACTION_STOP_RING = "phoenix.smsnotify.STOP_RING"
@@ -459,6 +482,7 @@ object ImportantNotify {
     fun ensureChannel(ctx: Context) {
         AppNotify.ensureChannel(ctx, CHANNEL)
         AppNotify.ensureChannel(ctx, RING_CHANNEL)
+        AppNotify.ensureChannel(ctx, ISLAND_CHANNEL)
     }
 
     fun notifyHit(ctx: Context, rule: ImportantRule, body: String) {
@@ -466,15 +490,26 @@ object ImportantNotify {
 
         val mode = rule.ringMode
         val longRing = mode != RingMode.ONCE
+        val title = "重要短信 · ${rule.label}"
 
         // 通知栏只有两行，摘要取「关键字 + 上下文」的第一行（两个关键字合并时也在这一行里），
         // 想看更多就展开通知。这里直接用纯文本摘要，彩色 span 在通知里不生效。
         val summary = smsSnippet(body, rule.keywords).firstOrNull()
             ?: smsSummary(body)
 
-        AppNotify.post(ctx, if (longRing) RING_CHANNEL.id else CHANNEL.id, NOTIF_ID) { b ->
+        // 先响铃、先立胶囊：它到底浮没浮出来，决定下面这条通知用哪条渠道。
+        // 「为什么响」现在由胶囊先说，比通知早十几毫秒，感知不到区别。
+        val island = AlarmRing.start(ctx, mode, title)
+
+        val channelId = when {
+            !longRing -> CHANNEL.id            // 单次提示：声音是这个渠道放的，必须 HIGH
+            island -> ISLAND_CHANNEL.id        // 胶囊在场：不弹横幅，只留通知栏那条
+            else -> RING_CHANNEL.id            // 没有胶囊权限：横幅是唯一能看见的提示
+        }
+
+        AppNotify.post(ctx, channelId, NOTIF_ID) { b ->
             b.setSmallIcon(android.R.drawable.stat_notify_chat)
-                .setContentTitle("重要短信 · ${rule.label}")
+                .setContentTitle(title)
                 .setContentText(summary)
                 // 摘要会被截断，展开后看全文
                 .setStyle(Notification.BigTextStyle().bigText(body))
@@ -505,9 +540,6 @@ object ImportantNotify {
             }
         }
         // 没授予通知权限时 AppNotify.post 会吞掉异常：记录照常入库，只是不弹通知
-
-        // 放在通知之后：先让用户看到"为什么响"，再出声
-        AlarmRing.start(ctx, mode)
     }
 
     private fun stopRing(ctx: Context, requestCode: Int): PendingIntent =

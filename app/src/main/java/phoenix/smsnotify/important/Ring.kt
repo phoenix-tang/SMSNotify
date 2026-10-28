@@ -1,6 +1,5 @@
 package phoenix.smsnotify.important
 
-import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -12,6 +11,7 @@ import android.media.RingtoneManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import phoenix.smsnotify.common.AppNotify
 
 /**
  * 响铃时长：每条规则自己选。
@@ -56,13 +56,17 @@ enum class RingMode(val ms: Long, val label: String) {
  *  - API 28 起有 `isLooping`，一行就是「一直响」；
  *  - `USAGE_ALARM` 走闹钟流，静音模式下照样响（和重要短信渠道同一套语义）。
  *
- * 进程被冻结时声音会停 —— 这是这个方案最大的短板：`BroadcastReceiver.onReceive`
- * 返回后进程就掉回 cached，厂商的冻结机制可能连 AudioTrack 一起冻住。
- * 真正的解法是用前台服务持有播放（`FOREGROUND_SERVICE_MEDIA_PLAYBACK`），
- * 但 Android 12 起后台启动前台服务受限，需要先确认短信广播是否在临时白名单里。
+ * **不做前台服务保活**：最初打算用 `FOREGROUND_SERVICE_MEDIA_PLAYBACK` 死守进程，
+ * 但长响一共也就几分钟，而闹钟流本身已经能穿过静音、穿过勿扰（用户勾了屏蔽闹钟除外），
+ * 剩下的风险只有「厂商把进程冻住导致声音提前停」。为一个几十秒到三分钟的声音常驻一条
+ * 前台服务通知、还要在 Android 12+ 的后台启动限制里找空子，代价明显大于收益 ——
+ * 真被冻结了，用户看到的是「响得短了点」，而不是「没响」：通知在、胶囊也在。
  *
- * TODO(响铃保活)：改用前台服务播放，渠道类型 mediaPlayback，通知里带「停止」按钮。
- * TODO(闹钟界面)：无限响铃时全屏亮屏 + 锁屏上直接给「停止」，现在只有通知上的按钮和打开 App。
+ * 进程真被回收时胶囊会一起消失，但通知还在通知栏里，也有「停止响铃」按钮，
+ * 所以任何一种死法都留着至少一条能让用户按到「停」的路。
+ *
+ * TODO(锁屏闹钟界面)：屏幕锁着时用 `USE_FULL_SCREEN_INTENT` + 全屏 Activity 盖住锁屏
+ * （现在只有 [RingIsland] 的胶囊和通知，锁屏上按停仍要解锁）。
  */
 object AlarmRing {
 
@@ -81,21 +85,28 @@ object AlarmRing {
     /**
      * 开始响铃。**总是先停掉正在响的那一条** —— 连着来两条重要短信时，
      * 用户听到的应该是后一条的时长，而不是两条铃声叠在一起。
+     *
+     * @param title 胶囊上显示的规则名，形如「重要短信 · 银行动账」
+     * @return 胶囊是否已经浮出来。调用方拿它决定通知要不要弹横幅：胶囊在的时候横幅是重复的，
+     *   而且横幅的窗口层级在悬浮窗之上，会正好把胶囊盖住。
      */
-    fun start(ctx: Context, mode: RingMode) {
+    fun start(ctx: Context, mode: RingMode, title: String): Boolean {
         stop()
-        if (mode.ms == 0L) return          // 单次提示走系统渠道，这里不放音
+        if (mode.ms == 0L) return false          // 单次提示走系统渠道，这里不放音也不出胶囊
 
         val app = ctx.applicationContext
         val rt = openRingtone(app) ?: run {
             Log.w(TAG, "没有可用的系统铃声，放弃播放")
-            return
+            return false
         }
         rt.isLooping = true
         ringtone = rt
         holdFocus(app)
         rt.play()
         Log.i(TAG, "start mode=${mode.name} ms=${mode.ms}")
+
+        // 有悬浮窗权限时顶上浮出胶囊；没有就只剩通知栏那条，不影响响铃
+        val island = RingIsland.show(app, title)
 
         if (mode.ms > 0) {
             val t = Runnable {
@@ -105,6 +116,7 @@ object AlarmRing {
             timeout = t
             handler.postDelayed(t, mode.ms)
         }
+        return island
     }
 
     /** 停止响铃；没在响时调用是安全的（按钮可能被连点，或者超时和手动停止撞在一起） */
@@ -119,6 +131,7 @@ object AlarmRing {
         }
         ringtone = null
         releaseFocus()
+        RingIsland.hide()
     }
 
     /**
@@ -175,16 +188,24 @@ object AlarmRing {
 }
 
 /**
+ * 「别响了」的唯一入口：停声音 + 收通知。
+ *
+ * 三处都走这里 —— 通知上的按钮、划掉通知、胶囊上的红点。分开写的话很容易漏掉其中一步
+ * （比如停了声音却留着一条写着「响铃中」的通知），用户会以为停不下来。
+ */
+internal fun stopRinging(ctx: Context) {
+    AlarmRing.stop()
+    AppNotify.cancel(ctx, ImportantNotify.NOTIF_ID)
+}
+
+/**
  * 「停止响铃」：通知上的动作按钮和划掉通知都走这里。
  *
  * 用广播而不是再开一个 Activity —— 用户要的是「别响了」，不该为此跳进 App。
- * 停掉声音的同时把通知也收掉：这条提醒的目的（引起注意）已经达成，留着只会占通知栏。
  */
 class StopRingReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        AlarmRing.stop()
-        context.getSystemService(NotificationManager::class.java)
-            .cancel(ImportantNotify.NOTIF_ID)
+        stopRinging(context)
     }
 }
