@@ -48,6 +48,9 @@ class MainActivity : BaseActivity() {
     private lateinit var settingsPage: SettingsPageView
     private lateinit var nav: BottomNavBar
 
+    /** 当前选中的 Tab。响铃时要靠它判断「页面里的响铃卡片是否看得见」，从而决定胶囊让不让位 */
+    private var currentTab = TAB_DELIVERY
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -106,9 +109,10 @@ class MainActivity : BaseActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 打开 App 就算"我看到了"：长响的规则不该在用户盯着屏幕时继续叫，
-        // 通知上的「停止响铃」和划掉通知是另两条退路
-        AlarmRing.stop()
+        // 这里**不停响铃**：点胶囊或点通知进来只是「看」，停由重要短信页上那张
+        // 响铃卡片的停止键负责 —— 和系统闹钟一致（点进时钟 App，闹钟还在响，按停止才停）。
+        // 既然铃声还在响，胶囊就该让位给页面里的卡片，别压着标题栏
+        AlarmRing.onRingCardVisible(this, currentTab == TAB_IMPORTANT)
         // 从系统设置（可能是去开悬浮窗权限）返回时，设置页的副标题要跟着变
         settingsPage.refresh()
         // 两屏都挂监听：另一屏不在前台时收到的短信，切过去就是最新的
@@ -120,15 +124,20 @@ class MainActivity : BaseActivity() {
         super.onPause()
         deliveryPage.detach()
         importantPage.detach()
+        // 离开 App 就只剩胶囊和通知能提醒了
+        AlarmRing.onRingCardVisible(this, false)
     }
 
     private fun selectTab(index: Int) {
+        currentTab = index
         deliveryPage.visibility = if (index == TAB_DELIVERY) View.VISIBLE else View.GONE
         importantPage.visibility = if (index == TAB_IMPORTANT) View.VISIBLE else View.GONE
         settingsPage.visibility = if (index == TAB_SETTINGS) View.VISIBLE else View.GONE
         nav.setSelected(index)
         // 切到重要短信时补一次刷新：页面上有"最新通知"，不能等到下次收短信才更新
         if (index == TAB_IMPORTANT) importantPage.refresh()
+        // 响铃时：切到这一屏就把胶囊收起来，切走再放回去
+        AlarmRing.onRingCardVisible(this, index == TAB_IMPORTANT)
     }
 
     /** 返回是否弹出了权限申请（弹出时保活指引要等申请结果回来再显示，避免两个弹窗叠一起） */

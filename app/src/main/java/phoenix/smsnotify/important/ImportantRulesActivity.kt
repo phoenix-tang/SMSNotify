@@ -83,12 +83,12 @@ class ImportantRulesActivity : BaseActivity() {
 
             line1.setRowTitle(r.label, dimmed = !r.enabled)
 
-            // 配置摘要：命中的文字 + 非默认的响铃时长（默认的「单次提示」不占位置）
+            // 配置摘要：命中的文字 + 非默认的响铃时长（默认档不占位置）
             // 名称留空时 label 取的是第一段文字，摘要里就不再重复它
             val keywords = if (r.name.isBlank()) r.keywords.drop(1) else r.keywords
             val parts = mutableListOf<String>()
             if (keywords.isNotEmpty()) parts.add(keywords.joinToString("、"))
-            if (r.ringMs != 0L) parts.add(r.ringMode.badge)
+            if (r.ringMode != RingMode.DEFAULT) parts.add(r.ringMode.badge)
             line2.setRowSub(parts.joinToString("　·　"))
 
             toggle.setChecked(r.enabled, animate = false)

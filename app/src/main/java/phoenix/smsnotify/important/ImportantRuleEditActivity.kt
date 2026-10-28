@@ -37,7 +37,7 @@ class ImportantRuleEditActivity : BaseActivity() {
     private var origin: ImportantRule? = null
 
     /** 当前选择的响铃时长（毫秒），语义见 [RingMode] */
-    private var ringMs = 0L
+    private var ringMs = RingMode.DEFAULT.ms
 
     private lateinit var nameEdit: EditText
     private lateinit var keywordEdit: EditText
@@ -94,7 +94,7 @@ class ImportantRuleEditActivity : BaseActivity() {
 
         // 响铃时长。项名放进灰色选择行里，不再单独占一行 label：
         // 一个灰底块 + 上方一行孤立的标题，视觉上是两个块，反而更散
-        ringMs = rule?.ringMs ?: 0L
+        ringMs = rule?.ringMs ?: RingMode.DEFAULT.ms
         root.addView(
             buildRingRow(),
             LinearLayout.LayoutParams(
@@ -209,8 +209,8 @@ class ImportantRuleEditActivity : BaseActivity() {
     /**
      * 「响铃时长」设置行。
      *
-     * 用「一整行可点 + 右侧显示当前值」，而不是把 6 个选项铺成一排按钮：
-     * 中文选项从「单次提示」到「无限」宽度差很大，等分排会挤成两行、
+     * 用「一整行可点 + 右侧显示当前值」，而不是把 5 个选项铺成一排按钮：
+     * 中文选项从「10 秒」到「无限」宽度差很大，等分排会挤成两行、
      * 长的那几个还会被截断。点开单选列表，一眼看全，也不用担心窄屏。
      *
      * 项名就在行内左侧（「响铃时长」），行上方不再放 label ——

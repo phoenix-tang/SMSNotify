@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.Icon
-import android.media.AudioAttributes
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
@@ -38,7 +37,7 @@ import java.io.File
  * @param keywords 匹配文字，每一段都出现在短信里才算命中（AND）
  * @param enabled  右侧开关，停用后不再记录（历史记录保留）
  * @param createdAt 添加时间，列表按它倒序（最新添加的在最上面）
- * @param ringMs   响铃时长，语义见 [RingMode]：0 单次、>0 响这么多毫秒、-1 一直响到手动停
+ * @param ringMs   响铃时长，语义见 [RingMode]：>0 响这么多毫秒、-1 一直响到手动停
  */
 data class ImportantRule(
     val id: Long,
@@ -46,7 +45,7 @@ data class ImportantRule(
     val keywords: List<String>,
     val enabled: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
-    val ringMs: Long = 0L
+    val ringMs: Long = RingMode.DEFAULT.ms
 ) {
     /** 展示用名称：没填名称时退回第一段匹配文字，再不行给个占位 */
     val label: String
@@ -124,8 +123,9 @@ object ImportantStore {
                             .filter { it.isNotBlank() },
                         enabled = o.optBoolean("enabled", true),
                         createdAt = o.optLong("createdAt", 0L),
-                        // 老数据没有这个字段：读成 0 = 单次提示，和改造前的行为一致
-                        ringMs = o.optLong("ringMs", 0L)
+                        // 认不出的存盘值（含已删除的「单次提示」= 0）一并归一成默认档，
+                        // 这样内存里的值一定是合法枚举，界面和列表摘要都不会算错
+                        ringMs = RingMode.of(o.optLong("ringMs", RingMode.DEFAULT.ms)).ms
                     )
                 )
                 if (id >= nextRuleId) nextRuleId = id + 1
@@ -407,49 +407,34 @@ private fun snippetLine(body: String, from: Int, to: Int): String {
 }
 
 /**
- * 命中重要规则时的系统通知：**高优先级**，会响铃/震动。
+ * 命中重要规则时的系统通知：**高优先级**，带振动，并且一定带「停止响铃」。
  *
  * 与快递那条常驻通知的区别：快递是「有待取件」的状态栏提示、安静且不可划掉；
- * 这里是「刚刚来了一条你在意的短信」，是一次性事件，点了就消。
- * 两条通知渠道分开，用户可以在系统设置里单独关掉其中一个。
+ * 这里是「刚刚来了一条你在意的短信」，是一次响铃事件。两条通知渠道分开，
+ * 用户可以在系统设置里单独关掉其中一个。
  *
- * 响铃时长按规则配置（[RingMode]），长响必须走两个渠道：
- *  - `important_sms`：系统放音，响一遍。渠道声音**只在创建时固化**，系统从不给「响 30 秒」这种参数；
- *  - `important_sms_ring`：渠道静音，声音由 [AlarmRing] 循环播放，所以时长随便定。
+ * 声音**从不交给渠道**：渠道只会响固定的一遍，系统不给「响 30 秒」这种参数，
+ * 时长和「随时可停」都由 [AlarmRing] 自己控制。所以下面两条渠道都是静音的，
+ * 差别只在重要性和振动：
+ *  - `important_sms_ring`：HIGH。屏幕上什么都没有时用它，横幅是唯一能看见的提示；
+ *  - `important_sms_ring_island`：**胶囊已经浮出来时**才用。只把重要性降到 DEFAULT ——
+ *    横幅（heads-up）只有 HIGH 才会弹，这样屏幕上只剩胶囊一处提示，
+ *    通知栏那条照样留着「停止响铃」。
  *
- * 拆成两条渠道是没得选的（一条渠道一个声音策略），好处是用户在系统设置里能分别看懂
- * 「普通提醒」和「长响提醒」各自会不会响。
- *
- * 另有一条 `important_sms_ring_island`：**胶囊已经浮出来时**才用。它和上一条同样静音，
- * 唯一区别是重要性降到 DEFAULT —— 横幅（heads-up）只有 HIGH 才会弹。这样屏幕上只会
- * 出现胶囊一处提示，通知栏那条照样留着「停止响铃」。
+ * 两条不能合成一条，是因为横幅是**渠道级**属性：`setSilent(true)` 只压声音，
+ * 压不住"要不要弹横幅"这件事。
  */
 object ImportantNotify {
     /**
-     * 单次提示用的渠道：**高重要性 + 闹钟流声音 + 三短一停振动**。
+     * 响铃用的渠道：渠道本身不发声，声音由 [AlarmRing] 自己循环。
      *
-     * 声音走 `USAGE_ALARM` 而不是默认的通知流：通知流只要手机开静音就一声不响 ——
-     * 对"重要短信"来说这是最不能接受的失败方式。闹钟流独立于铃声/通知音量，静音模式下
-     * 仍然会响，代价是受"闹钟音量"控制，勿扰里勾了"屏蔽闹钟"时同样无效（那属于用户明确选择）。
-     *
-     * 渠道参数只在创建时固化（之后同 id 再建只更新名称/描述），开发阶段改完卸载重装即可。
+     * 振动留在渠道上（三短一停：比系统默认的两下更容易被注意到，又不像来电那样长震）——
+     * 静音的循环铃声没有"结束点"，振动是唯一还能分辨「这是一次提醒」的东西。
      */
-    private val CHANNEL = AppNotify.ChannelSpec(
-        id = "important_sms",
-        name = "重要短信提醒",
-        description = "收到命中重要规则的短信时响铃提醒（静音模式下也会响，走闹钟音量）",
-        importance = NotificationManager.IMPORTANCE_HIGH,
-        soundUsage = AudioAttributes.USAGE_ALARM,
-        // 三短一停：比系统默认的两下更容易被注意到，又不像来电那样长震
-        vibration = longArrayOf(0, 400, 200, 400, 200, 400),
-        lights = true
-    )
-
-    /** 长响用的渠道：渠道本身不发声，声音由 [AlarmRing] 自己循环 */
     private val RING_CHANNEL = AppNotify.ChannelSpec(
         id = "important_sms_ring",
-        name = "重要短信提醒 · 长响",
-        description = "响铃时长设为 10 秒以上时使用；声音由本应用播放，点通知上的「停止响铃」可中止",
+        name = "重要短信提醒 · 响铃",
+        description = "命中重要规则时使用；声音由本应用播放，点通知上的「停止响铃」或划掉通知可中止",
         importance = NotificationManager.IMPORTANCE_HIGH,
         silent = true,
         vibration = longArrayOf(0, 400, 200, 400, 200, 400),
@@ -463,8 +448,8 @@ object ImportantNotify {
      * 照旧进通知栏、照旧带「停止响铃」，只是不再从顶部盖下来 —— 否则它会正好压在胶囊上，
      * 而且"重要短信在响"这件事在屏幕上说了两遍。
      *
-     * 为什么要单独建一条渠道而不是给单条通知加个开关：横幅是**渠道级**属性，
-     * `setSilent(true)` 只压声音，压不住没有 heads-up 这件事。
+     * 振动要和 [RING_CHANNEL] 保持一致：少了横幅，更容易被漏看；而用户可能正盯着屏幕，
+     * 手上那一下震动往往比声音更早被注意到。
      */
     private val ISLAND_CHANNEL = AppNotify.ChannelSpec(
         id = "important_sms_ring_island",
@@ -472,6 +457,7 @@ object ImportantNotify {
         description = "顶部浮出胶囊时使用：不弹横幅，只在通知栏留一条带「停止响铃」的提醒",
         importance = NotificationManager.IMPORTANCE_DEFAULT,
         silent = true,
+        vibration = longArrayOf(0, 400, 200, 400, 200, 400),
         lights = true
     )
 
@@ -480,7 +466,6 @@ object ImportantNotify {
     private const val ACTION_STOP_RING = "phoenix.smsnotify.STOP_RING"
 
     fun ensureChannel(ctx: Context) {
-        AppNotify.ensureChannel(ctx, CHANNEL)
         AppNotify.ensureChannel(ctx, RING_CHANNEL)
         AppNotify.ensureChannel(ctx, ISLAND_CHANNEL)
     }
@@ -489,7 +474,6 @@ object ImportantNotify {
         ensureChannel(ctx)
 
         val mode = rule.ringMode
-        val longRing = mode != RingMode.ONCE
         val title = "重要短信 · ${rule.label}"
 
         // 通知栏只有两行，摘要取「关键字 + 上下文」的第一行（两个关键字合并时也在这一行里），
@@ -497,15 +481,15 @@ object ImportantNotify {
         val summary = smsSnippet(body, rule.keywords).firstOrNull()
             ?: smsSummary(body)
 
-        // 先响铃、先立胶囊：它到底浮没浮出来，决定下面这条通知用哪条渠道。
-        // 「为什么响」现在由胶囊先说，比通知早十几毫秒，感知不到区别。
-        val island = AlarmRing.start(ctx, mode, title)
+        // 先响铃、先立提醒：它到底看不看得见（胶囊浮出来了，或者 App 里的卡片正显示着），
+        // 决定下面这条通知用哪条渠道。「为什么响」现在由提醒自己先说，比通知早十几毫秒，感知不到区别。
+        val visible = AlarmRing.start(
+            ctx, mode, title,
+            excerpt = smsExcerpt(body, rule.keywords),
+            keywords = rule.keywords
+        )
 
-        val channelId = when {
-            !longRing -> CHANNEL.id            // 单次提示：声音是这个渠道放的，必须 HIGH
-            island -> ISLAND_CHANNEL.id        // 胶囊在场：不弹横幅，只留通知栏那条
-            else -> RING_CHANNEL.id            // 没有胶囊权限：横幅是唯一能看见的提示
-        }
+        val channelId = if (visible) ISLAND_CHANNEL.id else RING_CHANNEL.id
 
         AppNotify.post(ctx, channelId, NOTIF_ID) { b ->
             b.setSmallIcon(android.R.drawable.stat_notify_chat)
@@ -513,31 +497,31 @@ object ImportantNotify {
                 .setContentText(summary)
                 // 摘要会被截断，展开后看全文
                 .setStyle(Notification.BigTextStyle().bigText(body))
-                .setAutoCancel(true)
+                // 点通知只是「进 App 看」，铃声还在响 —— 通知必须留着：它上面的
+                // 「停止响铃」和划掉手势都是停止入口，自动消失的话用户就只剩胶囊一条路
+                .setAutoCancel(false)
                 .setOnlyAlertOnce(false)   // 每来一条都要响，不能被当成"同一通知的更新"
                 .setWhen(System.currentTimeMillis())
                 .setShowWhen(true)
                 .setContentIntent(AppNotify.openApp(ctx, MainActivity.TAB_IMPORTANT))
 
-            if (longRing) {
-                // 铃声停止时通知自己也消失：留一条"响铃中"却没有声音的通知只会让人困惑
-                mode.ms.takeIf { it > 0 }?.let { b.setTimeoutAfter(it) }
-                // 副标题交代"还要响多久"：无限那条不写「响铃中 · 无限」，
-                // 读出「响铃中 · 不会自动停」才知道要点按钮
-                b.setSubText(
-                    if (mode == RingMode.FOREVER) "响铃中 · 不会自动停"
-                    else "响铃中 · ${mode.label}"
-                )
-                b.addAction(
-                    Notification.Action.Builder(
-                        Icon.createWithResource(ctx, android.R.drawable.ic_lock_silent_mode),
-                        "停止响铃",
-                        stopRing(ctx, requestCode = 10)
-                    ).build()
-                )
-                // 划掉通知也当作"别响了"：闹钟响着却找不到停止的地方是最糟的体验
-                b.setDeleteIntent(stopRing(ctx, requestCode = 11))
-            }
+            // 铃声到点自停时通知跟着消失：留一条"响铃中"却没有声音的通知只会让人困惑
+            mode.ms.takeIf { it > 0 }?.let { b.setTimeoutAfter(it) }
+            // 副标题交代"还要响多久"：无限那条不写「响铃中 · 无限」，
+            // 读出「响铃中 · 不会自动停」才知道要点按钮
+            b.setSubText(
+                if (mode == RingMode.FOREVER) "响铃中 · 不会自动停"
+                else "响铃中 · ${mode.label}"
+            )
+            b.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(ctx, android.R.drawable.ic_lock_silent_mode),
+                    "停止响铃",
+                    stopRing(ctx, requestCode = 10)
+                ).build()
+            )
+            // 划掉通知也当作"别响了"：闹钟响着却找不到停止的地方是最糟的体验
+            b.setDeleteIntent(stopRing(ctx, requestCode = 11))
         }
         // 没授予通知权限时 AppNotify.post 会吞掉异常：记录照常入库，只是不弹通知
     }

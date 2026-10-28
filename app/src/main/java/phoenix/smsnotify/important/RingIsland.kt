@@ -60,8 +60,9 @@ import phoenix.smsnotify.ui.roundedBg
  * 场景审批，我们进不去，那个圆点就只剩「多一个状态要维护」，而且铃声还在响、屏幕上
  * 却只剩一个小圆点，比横条更让人困惑。少一个状态，也就少一类收尾回调打架的 bug。
  *
- * 点击分两处：整条点一下 = 打开 App 看这条短信（`MainActivity.onResume` 里会顺手停响）；
- * 右侧红点 = 只停响，不离开当前应用。
+ * 点击分两处：整条点一下 = 打开 App 看这条短信，**铃声继续响**，由页面顶部那张
+ * 响铃卡片上的停止键来停（和系统闹钟一致：点进时钟 App，闹钟还在响）；右侧红点 = 只停响，
+ * 不离开当前应用。
  */
 object RingIsland {
 
@@ -175,7 +176,8 @@ object RingIsland {
 
     /** 每秒刷一次「已响多久」，让用户判断还要不要继续听 */
     private fun startClock() {
-        startedAt = SystemClock.elapsedRealtime()
+        // 以铃声真正开始的时刻为准：前后台切换会重新挂胶囊，不能每次都从 00:00 重算
+        startedAt = AlarmRing.current?.since ?: SystemClock.elapsedRealtime()
         clock?.text = elapsed()
         val t = object : Runnable {
             override fun run() {
@@ -202,7 +204,7 @@ object RingIsland {
             // 右侧只留 6dp：停止键本身有 30dp，再给内边距会让它离圆角太远
             setPadding(ctx.dpi(12), ctx.dpi(9), ctx.dpi(6), ctx.dpi(9))
             background = ctx.roundedBg(AppColor.island, 22)
-            contentDescription = "重要短信响铃中：$text"
+            contentDescription = "重要短信响铃中：$text，点一下打开查看"
             isClickable = true
             isFocusable = true
             pressScale(0.96f)

@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -14,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import phoenix.smsnotify.common.TimeFmt
+import phoenix.smsnotify.ui.actionButton
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.AppIcons
 import phoenix.smsnotify.ui.BaseActivity
@@ -63,10 +65,23 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     /** 命中记录的左滑删除状态：同一时刻只允许一条记录露出删除按钮 */
     private val hitSwipe = SwipeGroup()
 
+    private lateinit var latestCard: LinearLayout
+    private lateinit var latestHeader: TextView
     private lateinit var latestCategory: TextView
     private lateinit var latestTime: TextView
+
+    /** 响铃时才出现：摘要区和停止键，包在 [latestRingBox] 里一起显隐 */
+    private lateinit var latestRingBox: LinearLayout
+    private lateinit var ringExcerptBox: LinearLayout
+
     private lateinit var scroll: ScrollView
     private lateinit var cardsBox: LinearLayout
+
+    /** 每秒刷一次「已响多久」；只在响铃时跑 */
+    private var ringTicker: Runnable? = null
+
+    /** 响铃起停时刷新卡片。抽成属性是为了 detach 时能摘掉同一个引用 */
+    private val ringListener: () -> Unit = { act.runOnUiThread { renderLatest() } }
 
     private fun dp(v: Int): Int = act.dp(v)
 
@@ -85,11 +100,14 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     /** 页面可见时挂上监听：收到短信立刻能看到「最新通知」变化 */
     fun attach() {
         ImportantStore.listener = { act.runOnUiThread { refresh() } }
+        AlarmRing.addListener(ringListener)
         refresh()
     }
 
     fun detach() {
         ImportantStore.listener = null
+        AlarmRing.removeListener(ringListener)
+        stopRingTicker()
     }
 
     // ---------------- UI 构建 ----------------
@@ -129,9 +147,14 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     /**
      * 顶部「最新通知」栏：左侧是最近一次命中的规则类别，右上角是那条短信的接收时间。
      * 点它直接展开并滚到对应规则 —— 收到提醒后最想看的就是"刚才那条属于哪个规则"。
+     *
+     * **响铃时它就地变身**：表头换成红色的「正在响铃」、右上角换成已响时长，下面长出一段
+     * 摘要和一个「停止响铃」按钮；铃声一停就缩回去。复用这一块而不是另起一张卡片，是因为
+     * 两者说的是同一件事（刚才捕获到什么），响铃时用户最该看到的就是这条短信本身，
+     * 两张内容重复的卡片叠在一起只会让人多扫一眼。
      */
     private fun buildLatestCard(): View {
-        val card = LinearLayout(act).apply {
+        latestCard = LinearLayout(act).apply {
             orientation = VERTICAL
             background = act.roundedBg(AppColor.blueBg, 12)
             setPadding(dp(14), dp(11), dp(14), dp(12))
@@ -147,13 +170,14 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
             setRowMeta("", color = AppColor.blueMuted)
             gravity = Gravity.END
         }
-        card.addView(LinearLayout(act).apply {
+        latestHeader = TextView(act).apply {
+            setCardHeader("最新通知")
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        latestCard.addView(LinearLayout(act).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(TextView(act).apply {
-                setCardHeader("最新通知")
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
+            addView(latestHeader)
             addView(latestTime)
         })
 
@@ -161,8 +185,26 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
             setCardTitle("")
             setPadding(0, dp(3), 0, 0)
         }
-        card.addView(latestCategory)
-        return card
+        latestCard.addView(latestCategory)
+
+        // 摘要 + 停止键：平时整块 GONE，只在响铃时出现
+        latestRingBox = LinearLayout(act).apply {
+            orientation = VERTICAL
+            visibility = GONE
+        }
+        ringExcerptBox = LinearLayout(act).apply { orientation = VERTICAL }
+        latestRingBox.addView(ringExcerptBox)
+
+        latestRingBox.addView(
+            act.actionButton("停止响铃", danger = true) { stopRinging(act) }.apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(6) }
+            }
+        )
+        latestCard.addView(latestRingBox)
+
+        return latestCard
     }
 
     // ---------------- 渲染 ----------------
@@ -181,15 +223,86 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         rules.forEach { cardsBox.addView(buildCard(it)) }
     }
 
+    /**
+     * 「最新通知」卡片的两种状态：平时是近期命中，响铃时变红并长出摘要和停止键。
+     *
+     * 响铃态用 [AlarmRing.current] 而不是 `ImportantStore.latest()`：状态跟着铃声走，
+     * 铃声一停就缩回去（划掉通知、超时自停、按停止键都会通知到这里）。
+     */
     private fun renderLatest() {
+        val subject = AlarmRing.current
+        if (subject != null) {
+            renderRinging(subject)
+            return
+        }
+
+        latestCard.background = act.roundedBg(AppColor.blueBg, 12)
+        latestHeader.setCardHeader("最新通知")
+        latestTime.setRowMeta("", color = AppColor.blueMuted)
+        latestRingBox.visibility = GONE
+        stopRingTicker()
+
         val latest = ImportantStore.latest()
         if (latest == null) {
             latestCategory.setCardTitle("暂无通知", dimmed = true)
-            latestTime.text = ""
         } else {
             latestCategory.setCardTitle(latest.first.label)
             latestTime.text = TimeFmt.short(latest.second.time)
         }
+    }
+
+    private fun renderRinging(subject: RingSubject) {
+        latestCard.background = act.roundedBg(AppColor.redBg, 12)
+        latestHeader.setCardHeader("正在响铃", color = AppColor.redText)
+        // 这一屏本来就叫「重要短信提醒」，前缀是给胶囊和通知用的，卡片里省掉
+        latestCategory.setCardTitle(subject.title.removePrefix("重要短信 · "))
+        latestTime.setRowMeta(ringElapsed(subject.since), color = AppColor.redText)
+
+        latestRingBox.visibility = VISIBLE
+        ringExcerptBox.removeAllViews()
+        val lines = subject.excerpt.split('\n').filter { it.isNotEmpty() }.take(2)
+        if (lines.isEmpty()) {
+            ringExcerptBox.addView(act.paragraph("（无内容）", topDp = 2))
+        } else {
+            lines.forEach { line ->
+                ringExcerptBox.addView(
+                    act.paragraph(highlightKeywords(line, subject.keywords), topDp = 2).apply {
+                        // 和记录行同一档：摘要已裁过，正常一行放得下，窄屏最多两行
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    }
+                )
+            }
+        }
+        startRingTicker()
+    }
+
+    private fun ringElapsed(since: Long): String {
+        val s = (SystemClock.elapsedRealtime() - since) / 1_000
+        return "已响 %02d:%02d".format(s / 60, s % 60)
+    }
+
+    private fun startRingTicker() {
+        if (ringTicker != null) return
+        val t = object : Runnable {
+            override fun run() {
+                val subject = AlarmRing.current
+                if (subject == null) {
+                    // 兜底：万一哪条停止路径没通知到，也不能把红色卡片和停止键留在屏幕上
+                    renderLatest()
+                    return
+                }
+                latestTime.text = ringElapsed(subject.since)
+                postDelayed(this, 1_000)
+            }
+        }
+        ringTicker = t
+        postDelayed(t, 1_000)
+    }
+
+    private fun stopRingTicker() {
+        ringTicker?.let { removeCallbacks(it) }
+        ringTicker = null
     }
 
     private fun buildEmptyHint(): View = act.emptyHint(
@@ -240,7 +353,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         }
 
         // 非默认响铃时长给个小红标签：一眼能看出"这条会一直响"，不用点进去确认
-        val ringTag = if (rule.ringMs != 0L) act.tagLabel(
+        val ringTag = if (rule.ringMode != RingMode.DEFAULT) act.tagLabel(
             rule.ringMode.badge, AppColor.redText, AppColor.redBg
         ).apply {
             // 左右都留 8dp：左边和规则名分开，右边和「N 条」分开，
