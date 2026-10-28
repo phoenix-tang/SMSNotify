@@ -12,7 +12,6 @@ import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
@@ -25,8 +24,10 @@ import android.widget.Toast
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.ToggleView
+import phoenix.smsnotify.ui.label
+import phoenix.smsnotify.ui.note
 import phoenix.smsnotify.ui.pressScale
-import phoenix.smsnotify.ui.rowRipple
+import phoenix.smsnotify.ui.ruleRow
 
 /**
  * 规则相关的两个页面：
@@ -44,7 +45,9 @@ import phoenix.smsnotify.ui.rowRipple
 class RulesActivity : BaseActivity() {
 
     private lateinit var adapter: RuleAdapter
-    private val gray = 0xFF9E9E9E.toInt()
+
+    /** 说明文字 / 停用态的灰，统一取全局配色 */
+    private val gray = AppColor.muted
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -164,24 +167,7 @@ class RulesActivity : BaseActivity() {
         }
 
         /** 行结构固定为 [文字列(weight=1), 开关]，复用时直接按下标取子 View */
-        private fun buildRow(): LinearLayout = LinearLayout(this@RulesActivity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(12), dp(8), dp(12))
-            rowRipple(cornerDp = 8)
-            addView(LinearLayout(this@RulesActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                addView(TextView(context))
-                addView(TextView(context))
-            })
-            addView(ToggleView(this@RulesActivity).apply {
-                contentDescription = "启用该规则"
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(28)
-                ).apply { marginStart = dp(12) }
-            })
-        }
+        private fun buildRow(): LinearLayout = ruleRow(this@RulesActivity)
     }
 }
 
@@ -196,7 +182,7 @@ class RuleEditActivity : BaseActivity() {
     /** 预设规则：参数只读，不显示保存/删除，但测试框照用 */
     private var readOnly = false
 
-    private val gray = 0xFF9E9E9E.toInt()
+    private val gray = AppColor.muted
 
     /** 前后缀输入框里「前缀」「后缀」占位提示的字色：比标签灰再浅一档 */
     private val hintGray = 0xFFBDBDBD.toInt()
@@ -388,23 +374,6 @@ class RuleEditActivity : BaseActivity() {
         RuleStore.save(r)
         Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show()
         finish()
-    }
-
-    private fun label(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 14f
-        setTextColor(gray)
-        setPadding(0, 24, 0, 8)
-    }
-
-    /** 小字说明：黑色加粗、字号偏小，挂在某个输入区下面，解释用户看不见的固定规则 */
-    private fun note(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 12f
-        setTextColor(Color.BLACK)
-        setTypeface(null, Typeface.BOLD)
-        setLineSpacing(dp(2).toFloat(), 1f)
-        setPadding(0, 6, 0, 0)
     }
 
     private fun splicerRow(

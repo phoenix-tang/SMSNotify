@@ -2,7 +2,6 @@ package phoenix.smsnotify.important
 
 import android.app.AlertDialog
 import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -16,6 +15,8 @@ import android.widget.TextView
 import android.widget.Toast
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
+import phoenix.smsnotify.ui.label
+import phoenix.smsnotify.ui.note
 import phoenix.smsnotify.ui.pressScale
 
 /**
@@ -35,7 +36,7 @@ class ImportantRuleEditActivity : BaseActivity() {
     /** 当前选择的响铃时长（毫秒），语义见 [RingMode] */
     private var ringMs = 0L
 
-    private val gray = 0xFF9E9E9E.toInt()
+    private val gray = AppColor.muted
     private val blue = AppColor.blue
     private val green = 0xFF2E7D32.toInt()
     private val red = 0xFFC62828.toInt()
@@ -262,22 +263,5 @@ class ImportantRuleEditActivity : BaseActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
-    }
-
-    private fun label(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 14f
-        setTextColor(gray)
-        setPadding(0, dp(24), 0, dp(8))
-    }
-
-    /** 小字说明：黑色加粗、字号偏小，挂在输入区下面，解释用户看不见的匹配行为 */
-    private fun note(text: String): TextView = TextView(this).apply {
-        this.text = text
-        textSize = 12f
-        setTextColor(Color.BLACK)
-        setTypeface(null, Typeface.BOLD)
-        setLineSpacing(dp(2).toFloat(), 1f)
-        setPadding(0, dp(10), 0, 0)
     }
 }

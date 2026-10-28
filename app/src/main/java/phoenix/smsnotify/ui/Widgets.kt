@@ -7,9 +7,11 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.os.Build
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.DecelerateInterpolator
 import kotlin.math.cos
 import kotlin.math.sin
@@ -225,12 +227,31 @@ class ToggleView @JvmOverloads constructor(
 
     override fun getAccessibilityClassName(): CharSequence = "android.widget.Switch"
 
-    override fun onInitializeAccessibilityNodeInfo(info: android.view.accessibility.AccessibilityNodeInfo) {
+    override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
         super.onInitializeAccessibilityNodeInfo(info)
         // 让 TalkBack / uiautomator 能读到"已开启/已关闭"
         info.className = "android.widget.Switch"
         info.isCheckable = true
-        info.isChecked = checked
+        applyCheckedState(info)
+    }
+
+    /**
+     * 上报开关状态。
+     *
+     * API 36 把 `isChecked` / `setChecked(boolean)` 标成废弃，改用三态的
+     * `setChecked(int)`（未选中 / 半选 / 已选中）；低版本没有这个重载，
+     * 仍走旧接口，否则读屏软件读不出"已开启/已关闭"。
+     */
+    @Suppress("DEPRECATION")
+    private fun applyCheckedState(info: AccessibilityNodeInfo) {
+        if (Build.VERSION.SDK_INT >= 36) {
+            info.setChecked(
+                if (checked) AccessibilityNodeInfo.CHECKED_STATE_TRUE
+                else AccessibilityNodeInfo.CHECKED_STATE_FALSE
+            )
+        } else {
+            info.isChecked = checked
+        }
     }
 
     private fun blend(from: Int, to: Int, t: Float): Int {

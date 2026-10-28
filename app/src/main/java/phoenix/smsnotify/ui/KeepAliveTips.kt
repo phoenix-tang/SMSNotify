@@ -9,7 +9,6 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
@@ -115,7 +114,7 @@ object KeepAliveTips {
         val appName = appLabel(activity)
         val col = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(activity, 20), dp(activity, 2), dp(activity, 20), 0)
+            setPadding(activity.dpi(20), activity.dpi(2), activity.dpi(20), 0)
         }
 
         col.addView(body(
@@ -132,7 +131,7 @@ object KeepAliveTips {
             activity,
             "找不到入口时，可在设置顶部搜索「自启动」「耗电管理」「后台运行」；" +
                 "其他品牌也是同样的两个开关。\n改完直接返回即可，不需要回到这里确认。"
-        ).apply { setPadding(0, dp(activity, 12), 0, dp(activity, 4)) })
+        ).apply { setPadding(0, activity.dpi(12), 0, activity.dpi(4)) })
 
         return ScrollView(activity).apply {
             isFillViewport = false
@@ -152,7 +151,7 @@ object KeepAliveTips {
         activity: Activity, v: Vendor, isCurrent: Boolean, appName: String
     ): LinearLayout = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(0, dp(activity, 10), 0, 0)
+        setPadding(0, activity.dpi(10), 0, 0)
 
         addView(TextView(activity).apply {
             text = if (isCurrent) "${v.name}　当前设备" else v.name
@@ -166,8 +165,8 @@ object KeepAliveTips {
                 text = "${i + 1}. " + step.replace("%s", appName)
                 textSize = 13f
                 setTextColor(BODY)
-                setLineSpacing(dp(activity, 2).toFloat(), 1f)
-                setPadding(0, dp(activity, 2), 0, 0)
+                setLineSpacing(activity.dpi(2).toFloat(), 1f)
+                setPadding(0, activity.dpi(2), 0, 0)
             })
         }
     }
@@ -176,7 +175,7 @@ object KeepAliveTips {
         this.text = text
         textSize = 13f
         setTextColor(BODY)
-        setLineSpacing(dp(activity, 2).toFloat(), 1f)
+        setLineSpacing(activity.dpi(2).toFloat(), 1f)
     }
 
     // ---------------- 小工具 ----------------
@@ -205,9 +204,4 @@ object KeepAliveTips {
             activity.startActivity(intent)
         } catch (_: Exception) { /* 极少数 ROM 没有该页面，忽略 */ }
     }
-
-    private fun dp(context: Context, v: Int): Int =
-        TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), context.resources.displayMetrics
-        ).toInt()
 }

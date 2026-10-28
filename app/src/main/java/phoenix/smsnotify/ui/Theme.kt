@@ -20,6 +20,12 @@ object AppColor {
     /** 占位/未选中（图标未选中态、hint） */
     val hint = 0xFF8E8E93.toInt()
 
+    /**
+     * 说明文字、停用态（列表条目被关掉后的整行颜色）。
+     * 比 [subText] 再浅一档：它常常整段出现，太深会抢正文的注意力。
+     */
+    val muted = 0xFF9E9E9E.toInt()
+
     /** 分隔发丝线 */
     val divider = 0xFFEBEBEF.toInt()
 

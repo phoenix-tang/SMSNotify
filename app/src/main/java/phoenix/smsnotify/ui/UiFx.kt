@@ -3,6 +3,7 @@ package phoenix.smsnotify.ui
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
 import android.animation.StateListAnimator
+import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -36,6 +37,14 @@ fun View.dp(v: Float): Float = v * resources.displayMetrics.density
 
 /** 同上，直接要整数像素（给 setPadding / LayoutParams 用） */
 fun View.dpi(v: Float): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
+
+/**
+ * dp → px 的 Context 版本。
+ *
+ * 建控件时（`TextView(ctx)` 刚 new 出来、还没 addView 到任何父容器）用不了 [View.dpi]，
+ * 但只要手上有个 Context 就够了。公共控件构造器统一走这个，不必各自再写一遍换算。
+ */
+fun Context.dpi(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
 /**
  * 按压缩放反馈：按下缩到 [pressedScale]，松开带一点回弹。

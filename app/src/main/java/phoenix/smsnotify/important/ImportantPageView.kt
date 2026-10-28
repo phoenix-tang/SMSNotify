@@ -12,22 +12,22 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import phoenix.smsnotify.common.TimeFmt
 import phoenix.smsnotify.ui.AppColor
+import phoenix.smsnotify.ui.AppIcons
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.ToggleView
-import phoenix.smsnotify.ui.pressScale
+import phoenix.smsnotify.ui.divider
 import phoenix.smsnotify.ui.rowRipple
 
 /**
  * 「重要短信提醒」这一屏。
  *
  *      ┌────────────────────────────┐
- *      │ 重要短信提醒                  │  ← 标题
+ *      │ 重要短信提醒            📖   │  ← 标题 + 书页图标（规则列表）
  *      │ ┌────────────────────────┐ │
  *      │ │ 最新通知            21:35 │ │  ← 单独一栏：最新命中的规则类别 + 时间
  *      │ │ 银行动账                  │ │
@@ -36,20 +36,19 @@ import phoenix.smsnotify.ui.rowRipple
  *      │    10-27 21:35  您尾号…    │
  *      │    10-26 09:12  您尾号…    │
  *      │ ▸ 验证码        8 条  [关]  │
- *      ├────────────────────────────┤
- *      │      ＋ 添加匹配规则          │  ← 固定在最下方
  *      └────────────────────────────┘
  *
  * 排序规则（用户明确要求）：
  *  - 规则之间：按添加时间倒序，最新添加的在最上面；
  *  - 规则内部：命中记录按短信时间倒序，最新的在最上面。
  *
- * 没有设置页：规则的增删改全在这一屏完成 —— 底部按钮添加、长按卡片编辑/删除。
+ * 这一屏只负责「看」：规则的新增/编辑/删除收在 [ImportantRulesActivity]（标题栏书页图标进入），
+ * 卡片上的长按菜单保留编辑/清空记录/删除，作为就地操作的快捷方式。
  */
 class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
 
     private val blue = AppColor.blue
-    private val gray = 0xFF9E9E9E.toInt()
+    private val gray = AppColor.muted
     private val body = 0xFF424242.toInt()
 
     /** 哪几条规则是展开的（只在本次运行内记住，重建页面不会丢，但重启后默认全部收起） */
@@ -87,7 +86,12 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     // ---------------- UI 构建 ----------------
 
     private fun build() {
-        addView(act.pageTitle("重要短信提醒", withBack = false))
+        // 标题栏右侧的书页图标 = 规则列表（增删改都在那里，这一屏只负责"看结果"）
+        val titleRow = act.pageTitle("重要短信提醒", withBack = false)
+        titleRow.addView(act.iconButton(AppIcons.book()) {
+            act.startActivity(Intent(act, ImportantRulesActivity::class.java))
+        })
+        addView(titleRow)
 
         addView(TextView(act).apply {
             text = "规则里的每段文字都出现在同一条短信里才算命中。点规则可展开看命中时间，长按可编辑或删除。"
@@ -114,16 +118,6 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         addView(scroll, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
-
-        addView(Button(act).apply {
-            text = "＋ 添加匹配规则"
-            pressScale(0.97f)
-            setOnClickListener {
-                act.startActivity(Intent(act, ImportantRuleEditActivity::class.java).putExtra("id", -1L))
-            }
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(8) })
     }
 
     /**
@@ -200,7 +194,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     }
 
     private fun emptyHint(): View = TextView(act).apply {
-        text = "还没有规则\n\n点最下方的「＋ 添加匹配规则」，填上你在意的文字\n" +
+        text = "还没有规则\n\n点右上角的书页图标进入规则列表，添加你在意的文字\n" +
             "收到包含这些文字的短信就会记在这里，并响铃提醒"
         textSize = 13f
         setTextColor(gray)
@@ -301,12 +295,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
             })
         } else {
             hitList.forEachIndexed { i, hit ->
-                if (i > 0) content.addView(View(act).apply {
-                    setBackgroundColor(0xFFF2F2F5.toInt())
-                    layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
-                    ).apply { topMargin = dp(7) }
-                })
+                if (i > 0) content.addView(act.divider(topMarginDp = 7))
                 content.addView(buildHitRow(hit, rule))
             }
         }

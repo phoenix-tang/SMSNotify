@@ -58,7 +58,7 @@ class DeliveryPageView(private val act: BaseActivity) : LinearLayout(act) {
 
     private val tabNames = arrayOf("全部", "未取出", "已取出")
     private val blue = AppColor.blue
-    private val gray = 0xFF9E9E9E.toInt()
+    private val gray = AppColor.muted
 
     private fun dp(v: Int): Int = act.dp(v)
 
@@ -89,15 +89,16 @@ class DeliveryPageView(private val act: BaseActivity) : LinearLayout(act) {
     // ---------------- UI 构建 ----------------
 
     private fun buildUi() {
-        // 标题行：标题 + 帮助 / 选择 / 设置三个图标（从左到右）
+        // 标题行：标题 + 帮助 / 选择 / 规则三个图标（从左到右）
         // 尺寸全部交给 BaseActivity.pageTitle / iconButton，和子页面保持一致
         val titleRow = act.pageTitle("快递取件记录", withBack = false)
         // 帮助：随时重看「后台保活」指引（首次安装时是自动弹的，之后从这里进）
         titleRow.addView(act.iconButton(AppIcons.help()) { KeepAliveTips.showNow(act) })
         selectBtn = act.iconButton(AppIcons.select()) { toggleSelectionMode() }
         titleRow.addView(selectBtn)
-        titleRow.addView(act.iconButton(AppIcons.gear()) {
-            act.startActivity(Intent(act, SettingsActivity::class.java))
+        // 规则列表：书页图标直达，不再藏在设置页里（设置已经升到底部导航的独立一栏）
+        titleRow.addView(act.iconButton(AppIcons.book()) {
+            act.startActivity(Intent(act, RulesActivity::class.java))
         })
         addView(titleRow)
 

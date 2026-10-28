@@ -17,6 +17,7 @@ import phoenix.smsnotify.important.AlarmRing
 import phoenix.smsnotify.important.ImportantNotify
 import phoenix.smsnotify.important.ImportantPageView
 import phoenix.smsnotify.important.ImportantStore
+import phoenix.smsnotify.settings.SettingsPageView
 import phoenix.smsnotify.ui.AppIcons
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.BottomNavBar
@@ -24,26 +25,27 @@ import phoenix.smsnotify.ui.KeepAliveTips
 import phoenix.smsnotify.ui.NavItem
 
 /**
- * 主页：底部导航 + 两屏内容。
+ * 主页：底部导航 + 三屏内容。
  *
  *      ┌──────────────────────────┐
- *      │ 快递服务 / 重要短信提醒（内容容器）│
+ *      │ 快递服务 / 重要短信提醒 / 设置（内容容器）│
  *      ├──────────────────────────┤
- *      │  快递服务   │  重要短信提醒  │  ← BottomNavBar
+ *      │ 快递服务 │ 重要短信提醒 │ 设置 │  ← BottomNavBar
  *      └──────────────────────────┘
  *
- * 两屏都是普通的 View（[DeliveryPageView] / [ImportantPageView]），一起创建、叠在
- * 同一个 FrameLayout 里，切换只是改 visibility：
+ * 三屏都是普通的 View（[DeliveryPageView] / [ImportantPageView] / [SettingsPageView]），
+ * 一起创建、叠在同一个 FrameLayout 里，切换只是改 visibility：
  *  - 没有 Activity 跳转，所以切 Tab 不闪、不过场、列表滚动位置和选择状态都保留；
- *  - 两屏的数据监听各自挂在对应的 Store 上，收到短信时不在前台的那一屏也会静默更新。
+ *  - 前两屏的数据监听各自挂在对应的 Store 上，收到短信时不在前台的那一屏也会静默更新。
  *
- * 本类只负责「外壳」：系统栏、权限、Tab 切换、生命周期的转发。业务都在两个页面视图里。
+ * 本类只负责「外壳」：系统栏、权限、Tab 切换、生命周期的转发。业务都在各个页面视图里。
  * 权限和保活指引仍然挂在这里 —— 它们是全应用一次性的，不属于任何一屏。
  */
 class MainActivity : BaseActivity() {
 
     private lateinit var deliveryPage: DeliveryPageView
     private lateinit var importantPage: ImportantPageView
+    private lateinit var settingsPage: SettingsPageView
     private lateinit var nav: BottomNavBar
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,12 +68,12 @@ class MainActivity : BaseActivity() {
         val container = FrameLayout(this)
         deliveryPage = DeliveryPageView(this)
         importantPage = ImportantPageView(this)
-        container.addView(deliveryPage, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-        ))
-        container.addView(importantPage, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
-        ))
+        settingsPage = SettingsPageView(this)
+        listOf<View>(deliveryPage, importantPage, settingsPage).forEach {
+            container.addView(it, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+        }
         root.addView(container, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
@@ -80,7 +82,8 @@ class MainActivity : BaseActivity() {
             this,
             listOf(
                 NavItem("快递服务", AppIcons.parcel()),
-                NavItem("重要短信提醒", AppIcons.bell())
+                NavItem("重要短信提醒", AppIcons.bell()),
+                NavItem("设置", AppIcons.gear())
             )
         ) { selectTab(it) }
         root.addView(nav, LinearLayout.LayoutParams(
@@ -120,6 +123,7 @@ class MainActivity : BaseActivity() {
     private fun selectTab(index: Int) {
         deliveryPage.visibility = if (index == TAB_DELIVERY) View.VISIBLE else View.GONE
         importantPage.visibility = if (index == TAB_IMPORTANT) View.VISIBLE else View.GONE
+        settingsPage.visibility = if (index == TAB_SETTINGS) View.VISIBLE else View.GONE
         nav.setSelected(index)
         // 切到重要短信时补一次刷新：页面上有"最新通知"，不能等到下次收短信才更新
         if (index == TAB_IMPORTANT) importantPage.refresh()
@@ -149,5 +153,6 @@ class MainActivity : BaseActivity() {
         const val EXTRA_TAB = "tab"
         const val TAB_DELIVERY = 0
         const val TAB_IMPORTANT = 1
+        const val TAB_SETTINGS = 2
     }
 }

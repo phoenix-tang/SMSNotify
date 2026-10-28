@@ -25,14 +25,18 @@
         </activity>
 
         <!-- ===== 快递功能（delivery 包） ===== -->
-        <activity android:name=".delivery.SettingsActivity" android:exported="false" />
+        <!-- 规则列表：由快递页标题栏的书页图标进入 -->
         <activity android:name=".delivery.RulesActivity" android:exported="false" />
         <activity android:name=".delivery.RuleEditActivity"
             android:windowSoftInputMode="adjustResize" android:exported="false" />
 
         <!-- ===== 重要短信提醒（important 包） ===== -->
+        <activity android:name=".important.ImportantRulesActivity" android:exported="false" />
         <activity android:name=".important.ImportantRuleEditActivity"
             android:windowSoftInputMode="adjustResize" android:exported="false" />
+
+        <!-- ===== 设置（settings 包）：底部导航第三栏里的子页 ===== -->
+        <activity android:name=".settings.AboutActivity" android:exported="false" />
 
         <!-- 通知上的「停止响铃」和划掉通知都发到这里：只由本应用的 PendingIntent 触发，不对外开放 -->
         <receiver
