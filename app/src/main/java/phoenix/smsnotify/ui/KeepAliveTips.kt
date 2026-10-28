@@ -4,8 +4,6 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -13,7 +11,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.TextView
 
 /**
  * 首次打开时的「后台保活」指引弹窗。
@@ -117,21 +114,21 @@ object KeepAliveTips {
             setPadding(activity.dpi(20), activity.dpi(2), activity.dpi(20), 0)
         }
 
-        col.addView(body(
-            activity,
+        col.addView(activity.paragraph(
             "系统会冻结后台应用：短信到了却唤不醒本应用，看起来就是「收不到、也没记录」。" +
-                "请按下面找到你的手机品牌，做一次设置，之后一直有效。"
+                "请按下面找到你的手机品牌，做一次设置，之后一直有效。",
+            topDp = 0
         ))
 
         vendors.forEachIndexed { i, v ->
             col.addView(vendorBlock(activity, v, i == current, appName))
         }
 
-        col.addView(body(
-            activity,
+        col.addView(activity.paragraph(
             "找不到入口时，可在设置顶部搜索「自启动」「耗电管理」「后台运行」；" +
-                "其他品牌也是同样的两个开关。\n改完直接返回即可，不需要回到这里确认。"
-        ).apply { setPadding(0, activity.dpi(12), 0, activity.dpi(4)) })
+                "其他品牌也是同样的两个开关。\n改完直接返回即可，不需要回到这里确认。",
+            topDp = 12
+        ))
 
         return ScrollView(activity).apply {
             isFillViewport = false
@@ -153,35 +150,17 @@ object KeepAliveTips {
         orientation = LinearLayout.VERTICAL
         setPadding(0, activity.dpi(10), 0, 0)
 
-        addView(TextView(activity).apply {
-            text = if (isCurrent) "${v.name}　当前设备" else v.name
-            textSize = 14.5f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(if (isCurrent) BLUE else Color.BLACK)
-        })
+        addView(activity.sectionTitle(
+            if (isCurrent) "${v.name}　当前设备" else v.name,
+            topDp = 10
+        ).apply { if (isCurrent) setTextColor(AppColor.blue) })
 
         v.steps.forEachIndexed { i, step ->
-            addView(TextView(activity).apply {
-                text = "${i + 1}. " + step.replace("%s", appName)
-                textSize = 13f
-                setTextColor(BODY)
-                setLineSpacing(activity.dpi(2).toFloat(), 1f)
-                setPadding(0, activity.dpi(2), 0, 0)
-            })
+            addView(activity.paragraph("${i + 1}. " + step.replace("%s", appName), topDp = 2))
         }
     }
 
-    private fun body(activity: Activity, text: String): TextView = TextView(activity).apply {
-        this.text = text
-        textSize = 13f
-        setTextColor(BODY)
-        setLineSpacing(activity.dpi(2).toFloat(), 1f)
-    }
-
     // ---------------- 小工具 ----------------
-
-    private val BLUE = AppColor.blue
-    private val BODY = 0xFF424242.toInt()
 
     /** 当前设备属于哪一家（-1 = 不在名单里，四家全都不高亮） */
     private fun currentVendor(): Int {

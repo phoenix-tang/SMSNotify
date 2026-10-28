@@ -7,12 +7,16 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.DecelerateInterpolator
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -266,3 +270,57 @@ class ToggleView @JvmOverloads constructor(
 
     private fun dp(v: Float): Float = v * resources.displayMetrics.density
 }
+
+// ---------------- 带底色的文字小件 ----------------
+//
+// 这两类是「文字 + 色块」的组合，规格（字号/字重/内边距）和底色都固定，只让内容变。
+// 之前它们散在页面里各写一遍 textSize + GradientDrawable，改一处就得翻页面找。
+
+/**
+ * 圆形状态标：快递条目左侧那个「✓ 已取 / i 未取」的圆点。
+ *
+ * @param color 圆的底色。已取绿、未取黄，由调用方按状态传 —— 同一个 View 会在列表
+ *              复用时改色，所以这里只负责形状、字号和白色文字。
+ */
+fun Context.statusDot(text: String, color: Int, sizeDp: Int = 26): TextView = TextView(this).apply {
+    this.text = text
+    textSize = 14f
+    setTypeface(null, android.graphics.Typeface.BOLD)
+    setTextColor(Color.WHITE)
+    gravity = android.view.Gravity.CENTER
+    background = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(color)
+    }
+    layoutParams = LinearLayout.LayoutParams(dpi(sizeDp), dpi(sizeDp)).apply {
+        marginEnd = dpi(10)
+    }
+}
+
+/**
+ * 小角标：卡片表头上那个「响 30 秒」的红字小标签。
+ *
+ * @param fg 文字色；@param bg 圆角底色。两者成对传入，保证是同一套红/绿语义。
+ */
+fun Context.tagLabel(text: String, fg: Int, bg: Int): TextView = TextView(this).apply {
+    this.text = text
+    textSize = 11f
+    setTextColor(fg)
+    setPadding(dpi(6), dpi(2), dpi(6), dpi(2))
+    background = GradientDrawable().apply {
+        cornerRadius = dpi(8).toFloat()
+        setColor(bg)
+    }
+}
+
+/**
+ * 列表左滑露出的删除按钮：红底白字，盖在条目右侧。
+ *
+ * 它和普通的 [actionButton] 不是一类东西 —— 不是「页面操作」，而是行上的危险动作，
+ * 所以单独一档规格（白字在红底上是 4.0:1，够用但不刺眼）。
+ */
+fun Context.swipeDeleteButton(text: String, onClick: () -> Unit): Button =
+    actionButton(text, onClick = onClick).apply {
+        setTextColor(Color.WHITE)
+        setBackgroundColor(AppColor.red)
+    }

@@ -1,17 +1,18 @@
 package phoenix.smsnotify.settings
 
-import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.TextView
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.AppIcons
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.PathIconView
+import phoenix.smsnotify.ui.appTitle
+import phoenix.smsnotify.ui.footNote
+import phoenix.smsnotify.ui.paragraph
+import phoenix.smsnotify.ui.sectionTitle
 
 /**
  * 关于页：应用叫什么、是什么版本、做什么用、数据存在哪。
@@ -33,7 +34,7 @@ class AboutActivity : BaseActivity() {
             iconColor = AppColor.blue
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0xFFE8F1FC.toInt())
+                setColor(AppColor.blueBg)
             }
             // 用 padding 把 24dp 的图形缩到圆底中间，比再套一层 FrameLayout 省事
             val pad = dp(14)
@@ -44,22 +45,12 @@ class AboutActivity : BaseActivity() {
             }
         })
 
-        root.addView(TextView(this).apply {
-            text = "短信提醒助手"
-            textSize = 20f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.BLACK)
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(12), 0, 0)
-        })
+        root.addView(appTitle("短信提醒助手"))
 
-        root.addView(TextView(this).apply {
-            text = "版本 ${AppInfo.versionName(this@AboutActivity)}（${AppInfo.versionCode(this@AboutActivity)}）"
-            textSize = 13f
-            setTextColor(AppColor.hint)
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, dp(4), 0, 0)
-        })
+        root.addView(footNote(
+            "版本 ${AppInfo.versionName(this@AboutActivity)}（${AppInfo.versionCode(this@AboutActivity)}）",
+            textSp = 13f, topDp = 4, bottomDp = 0
+        ))
 
         root.addView(section(
             "做什么",
@@ -83,22 +74,9 @@ class AboutActivity : BaseActivity() {
     private fun section(title: String, body: String): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(22), 0, 0)
-            addView(TextView(context).apply {
-                text = title
-                textSize = 14f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(Color.BLACK)
-            })
-            addView(TextView(context).apply {
-                text = body
-                textSize = 13f
-                setTextColor(AppColor.subText)
-                setLineSpacing(dp(3).toFloat(), 1f)
-                setPadding(0, dp(6), 0, 0)
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            })
+            addView(sectionTitle(title))
+            addView(paragraph(body), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
         }
 }

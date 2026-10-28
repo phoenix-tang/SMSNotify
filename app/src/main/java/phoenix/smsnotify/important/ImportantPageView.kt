@@ -6,7 +6,6 @@ import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
@@ -19,9 +18,20 @@ import phoenix.smsnotify.common.TimeFmt
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.AppIcons
 import phoenix.smsnotify.ui.BaseActivity
+import phoenix.smsnotify.ui.SwipeGroup
+import phoenix.smsnotify.ui.SwipeRow
 import phoenix.smsnotify.ui.ToggleView
 import phoenix.smsnotify.ui.divider
+import phoenix.smsnotify.ui.emptyHint
+import phoenix.smsnotify.ui.pageHint
+import phoenix.smsnotify.ui.paragraph
 import phoenix.smsnotify.ui.rowRipple
+import phoenix.smsnotify.ui.setCardHeader
+import phoenix.smsnotify.ui.setCardTitle
+import phoenix.smsnotify.ui.setDisclosure
+import phoenix.smsnotify.ui.setRowMeta
+import phoenix.smsnotify.ui.setRowTitle
+import phoenix.smsnotify.ui.tagLabel
 
 /**
  * 「重要短信提醒」这一屏。
@@ -47,12 +57,11 @@ import phoenix.smsnotify.ui.rowRipple
  */
 class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
 
-    private val blue = AppColor.blue
-    private val gray = AppColor.muted
-    private val body = 0xFF424242.toInt()
-
     /** 哪几条规则是展开的（只在本次运行内记住，重建页面不会丢，但重启后默认全部收起） */
     private val expanded = mutableSetOf<Long>()
+
+    /** 命中记录的左滑删除状态：同一时刻只允许一条记录露出删除按钮 */
+    private val hitSwipe = SwipeGroup()
 
     private lateinit var latestCategory: TextView
     private lateinit var latestTime: TextView
@@ -93,12 +102,9 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         })
         addView(titleRow)
 
-        addView(TextView(act).apply {
-            text = "规则里的每段文字都出现在同一条短信里才算命中。点规则可展开看命中时间，长按可编辑或删除。"
-            textSize = 12f
-            setTextColor(gray)
-            setPadding(0, 2, 0, 8)
-        })
+        addView(act.pageHint(
+            "点规则展开记录；记录左滑可删除，长按规则可编辑。", topDp = 2, bottomDp = 8
+        ))
 
         addView(buildLatestCard())
 
@@ -127,7 +133,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     private fun buildLatestCard(): View {
         val card = LinearLayout(act).apply {
             orientation = VERTICAL
-            background = rounded(0xFFE8F1FC.toInt(), null, 12)
+            background = rounded(AppColor.blueBg, null, 12)
             setPadding(dp(14), dp(11), dp(14), dp(12))
             isClickable = true
             isFocusable = true
@@ -138,27 +144,21 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         }
 
         latestTime = TextView(act).apply {
-            textSize = 12f
-            setTextColor(0xFF5C7FA8.toInt())
+            setRowMeta("", color = AppColor.blueMuted)
             gravity = Gravity.END
         }
         card.addView(LinearLayout(act).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(TextView(act).apply {
-                text = "最新通知"
-                textSize = 12f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(blue)
+                setCardHeader("最新通知")
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
             addView(latestTime)
         })
 
         latestCategory = TextView(act).apply {
-            textSize = 18f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.BLACK)
+            setCardTitle("")
             setPadding(0, dp(3), 0, 0)
         }
         card.addView(latestCategory)
@@ -169,12 +169,13 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
 
     fun refresh() {
         if (!::cardsBox.isInitialized) return
+        hitSwipe.close(animate = false)   // 卡片要整体重建，展开态跟着旧 View 一起丢弃
         renderLatest()
 
         cardsBox.removeAllViews()
         val rules = ImportantStore.rules()
         if (rules.isEmpty()) {
-            cardsBox.addView(emptyHint())
+            cardsBox.addView(buildEmptyHint())
             return
         }
         rules.forEach { cardsBox.addView(buildCard(it)) }
@@ -183,25 +184,19 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     private fun renderLatest() {
         val latest = ImportantStore.latest()
         if (latest == null) {
-            latestCategory.text = "暂无通知"
-            latestCategory.setTextColor(gray)
+            latestCategory.setCardTitle("暂无通知", dimmed = true)
             latestTime.text = ""
         } else {
-            latestCategory.text = latest.first.label
-            latestCategory.setTextColor(Color.BLACK)
+            latestCategory.setCardTitle(latest.first.label)
             latestTime.text = TimeFmt.short(latest.second.time)
         }
     }
 
-    private fun emptyHint(): View = TextView(act).apply {
-        text = "还没有规则\n\n点右上角的书页图标进入规则列表，添加你在意的文字\n" +
-            "收到包含这些文字的短信就会记在这里，并响铃提醒"
-        textSize = 13f
-        setTextColor(gray)
-        gravity = Gravity.CENTER
-        setLineSpacing(dp(3).toFloat(), 1f)
-        setPadding(dp(8), dp(56), dp(8), dp(8))
-    }
+    private fun buildEmptyHint(): View = act.emptyHint(
+        "还没有规则\n\n点右上角的书页图标进入规则列表，添加你在意的文字\n" +
+            "收到包含这些文字的短信就会记在这里，并响铃提醒",
+        topDp = 56
+    )
 
     /** 一条规则的卡片：表头（箭头 + 名称 + 条数 + 开关）+ 展开区（命中记录） */
     private fun buildCard(rule: ImportantRule): View {
@@ -210,7 +205,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
 
         val card = LinearLayout(act).apply {
             orientation = VERTICAL
-            background = rounded(Color.WHITE, 0xFFECECF0.toInt(), 12)
+            background = rounded(Color.WHITE, AppColor.cardBorder, 12)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = dp(10) }
@@ -218,29 +213,19 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
 
         // ---- 表头 ----
         val arrow = TextView(act).apply {
-            text = if (isOpen) "▾" else "▸"
-            textSize = 13f
-            setTextColor(if (rule.enabled) 0xFF616161.toInt() else gray)
+            setDisclosure(isOpen, dimmed = !rule.enabled)
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dp(18), ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         val name = TextView(act).apply {
-            text = rule.label
-            textSize = 16f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(when {
-                !rule.enabled -> gray
-                else -> Color.BLACK
-            })
+            setRowTitle(rule.label, dimmed = !rule.enabled)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 .apply { marginStart = dp(6) }
         }
         val count = TextView(act).apply {
-            text = if (hitList.isEmpty()) "无记录" else "${hitList.size} 条"
-            textSize = 12f
-            setTextColor(gray)
+            setRowMeta(if (hitList.isEmpty()) "无记录" else "${hitList.size} 条")
         }
         val toggle = ToggleView(act).apply {
             contentDescription = "启用该规则"
@@ -255,15 +240,17 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         }
 
         // 非默认响铃时长给个小红标签：一眼能看出"这条会一直响"，不用点进去确认
-        val ringTag = if (rule.ringMs != 0L) TextView(act).apply {
-            text = "响 ${rule.ringMode.label}"
-            textSize = 11f
-            setTextColor(0xFFC62828.toInt())
-            setPadding(dp(6), dp(2), dp(6), dp(2))
-            background = rounded(0xFFFDECEA.toInt(), null, 8)
+        val ringTag = if (rule.ringMs != 0L) act.tagLabel(
+            rule.ringMode.badge, AppColor.redText, AppColor.redBg
+        ).apply {
+            // 左右都留 8dp：左边和规则名分开，右边和「N 条」分开，
+            // 否则「无限响铃 2 条」会读成一句
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { marginStart = dp(8) }
+            ).apply {
+                marginStart = dp(8)
+                marginEnd = dp(8)
+            }
         } else null
 
         val header = LinearLayout(act).apply {
@@ -288,9 +275,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         }
         if (hitList.isEmpty()) {
             content.addView(TextView(act).apply {
-                text = if (rule.enabled) "还没有命中记录" else "规则已停用，不再记录新短信"
-                textSize = 12f
-                setTextColor(gray)
+                setRowMeta(if (rule.enabled) "还没有命中记录" else "规则已停用，不再记录新短信")
                 setPadding(dp(24), 0, 0, dp(2))
             })
         } else {
@@ -306,7 +291,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         header.setOnClickListener {
             val open = rule.id !in expanded
             if (open) expanded.add(rule.id) else expanded.remove(rule.id)
-            arrow.text = if (open) "▾" else "▸"
+            arrow.setDisclosure(open, dimmed = !rule.enabled)
             animateHeight(content, open)
         }
 
@@ -349,38 +334,41 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
      *     …您尾号1234的账户余额为1,234.00元，可用余额…      ← 关键字红色加粗
      *
      * 摘要有两个关键字且彼此间隔较远时会占两行；间隔不超过 20 字则合并成一行。
-     * 具体切分规则在 [smsSnippet] 里，这里只负责把每行渲染出来。
+     * 切分发生在**入库时**（见 [smsExcerpt]），这里只负责把存下来的文字按关键字重新上色 ——
+     * 原文不入库，所以改了规则关键字也不会影响已有记录的内容。
+     *
+     * 整行套一层 [SwipeRow]：左滑露出删除按钮，和快递列表是同一套交互与动画。
      */
-    private fun buildHitRow(hit: ImportantHit, rule: ImportantRule): View = LinearLayout(act).apply {
-        orientation = VERTICAL
-        setPadding(0, dp(7), 0, 0)
+    private fun buildHitRow(hit: ImportantHit, rule: ImportantRule): View {
+        val content = LinearLayout(act).apply {
+            orientation = VERTICAL
+            setPadding(0, dp(7), 0, 0)
 
-        addView(TextView(act).apply {
-            text = TimeFmt.short(hit.time)
-            textSize = 12f
-            setTextColor(gray)
-        })
-
-        val lines = smsSnippet(hit.body, rule.keywords)
-        if (lines.isEmpty()) {
             addView(TextView(act).apply {
-                text = "（无内容）"
-                textSize = 13f
-                setTextColor(gray)
+                setRowMeta(TimeFmt.short(hit.time))
             })
-            return@apply
+
+            val lines = hit.excerpt.split('\n').filter { it.isNotEmpty() }
+            if (lines.isEmpty()) {
+                addView(TextView(act).apply {
+                    setRowMeta("（无内容）")
+                })
+            } else {
+                lines.forEach { line ->
+                    addView(act.paragraph(highlightKeywords(line, rule.keywords), topDp = 2).apply {
+                        // 摘要已经做过裁剪，正常一行放得下；窄屏换行时最多两行
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                    })
+                }
+            }
         }
-        lines.forEach { line ->
-            addView(TextView(act).apply {
-                text = line          // 富文本：关键字已带红色 + 加粗 span
-                textSize = 13f
-                setTextColor(body)
-                setPadding(0, dp(2), 0, 0)
-                setLineSpacing(dp(1).toFloat(), 1f)
-                // 摘要已经做过裁剪，正常一行放得下；窄屏换行时最多两行
-                maxLines = 2
-                ellipsize = android.text.TextUtils.TruncateAt.END
-            })
+
+        return SwipeRow(act, content).apply {
+            bind(hitSwipe, hit.id, hitSwipe.isOpen(hit.id)) {
+                ImportantStore.removeHit(hit.id)
+                refresh()
+            }
         }
     }
 

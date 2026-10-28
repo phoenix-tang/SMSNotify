@@ -29,7 +29,18 @@ enum class RingMode(val ms: Long, val label: String) {
     S30(30_000L, "30 秒"),
     M1(60_000L, "1 分钟"),
     M3(180_000L, "3 分钟"),
-    FOREVER(-1L, "持续响铃，手动停止");
+    FOREVER(-1L, "无限");
+
+    /**
+     * 卡片角标、列表摘要用的短语。
+     *
+     * 不能就地拼「响 ${label}」：可数时长读作「响 30 秒」没问题，
+     * 无限那条会变成「响 无限」，两个「响」撞在一起读不通。
+     *
+     * 「手动停止」不再写进选项名 —— 它本来就不是无限模式的特性，
+     * 所有非单次的时长都能随时停（见 [AlarmRing.stop]），标在其中一个选项上会让人以为别的不行。
+     */
+    val badge: String get() = if (this == FOREVER) "无限响铃" else "响 $label"
 
     companion object {
         /** 存盘值 → 枚举；遇到不认识的毫秒数按「单次」处理，不让一条怪数据把提醒变成哑巴 */
@@ -51,7 +62,7 @@ enum class RingMode(val ms: Long, val label: String) {
  * 但 Android 12 起后台启动前台服务受限，需要先确认短信广播是否在临时白名单里。
  *
  * TODO(响铃保活)：改用前台服务播放，渠道类型 mediaPlayback，通知里带「停止」按钮。
- * TODO(闹钟界面)：持续响铃时全屏亮屏 + 锁屏上直接给「停止」，现在只有通知上的按钮和打开 App。
+ * TODO(闹钟界面)：无限响铃时全屏亮屏 + 锁屏上直接给「停止」，现在只有通知上的按钮和打开 App。
  */
 object AlarmRing {
 

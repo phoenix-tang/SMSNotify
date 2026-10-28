@@ -1,23 +1,26 @@
 package phoenix.smsnotify.important
 
 import android.app.AlertDialog
-import android.graphics.Color
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
+import phoenix.smsnotify.ui.actionButton
+import phoenix.smsnotify.ui.applyInputStyle
+import phoenix.smsnotify.ui.choiceRow
+import phoenix.smsnotify.ui.formFeedback
 import phoenix.smsnotify.ui.label
 import phoenix.smsnotify.ui.note
-import phoenix.smsnotify.ui.pressScale
+import phoenix.smsnotify.ui.setFeedback
+import phoenix.smsnotify.ui.setRowMeta
 
 /**
  * 重要短信规则的编辑页：名称 + 多段匹配文字 + 粘贴短信试匹配。
@@ -35,11 +38,6 @@ class ImportantRuleEditActivity : BaseActivity() {
 
     /** 当前选择的响铃时长（毫秒），语义见 [RingMode] */
     private var ringMs = 0L
-
-    private val gray = AppColor.muted
-    private val blue = AppColor.blue
-    private val green = 0xFF2E7D32.toInt()
-    private val red = 0xFFC62828.toInt()
 
     private lateinit var nameEdit: EditText
     private lateinit var keywordEdit: EditText
@@ -64,60 +62,59 @@ class ImportantRuleEditActivity : BaseActivity() {
         nameEdit = EditText(this).apply {
             hint = "如：银行动账（留空则用第一段文字代替）"
             setText(rule?.name ?: "")
-            textSize = 15f
             maxLines = 1
+            applyInputStyle()
         }
         root.addView(nameEdit)
 
         // 匹配文字（多段）
-        root.addView(label("匹配文字（每行一段，出现在短信里就算命中）"))
+        root.addView(label("匹配文字（每行一段）"))
         keywordEdit = EditText(this).apply {
             hint = "余额\n到账\n消费"
             setText(rule?.keywords?.joinToString("\n") ?: "")
-            textSize = 15f
             gravity = Gravity.TOP or Gravity.START
             minLines = 4
             setPadding(dp(12), dp(10), dp(12), dp(10))
-            setBackgroundColor(0xFFF7F7F9.toInt())
+            setBackgroundColor(AppColor.field)
+            applyInputStyle()
         }
         root.addView(keywordEdit, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ))
         keywordCount = TextView(this).apply {
-            textSize = 12f
-            setTextColor(gray)
+            setRowMeta("")
             setPadding(0, dp(6), 0, 0)
         }
         root.addView(keywordCount)
 
         root.addView(note(
-            "每行一段文字，不区分大小写；所有行都出现在同一条短信里才算命中，才记一条并响铃提醒。\n" +
-                "文字要尽量短而具体，写「余额」会连广告短信一起命中，写「尾号1234」更准。"
+            "每行一段，不区分大小写；全部出现在同一条短信里才算命中。\n" +
+                "写具体些：「尾号1234」比「余额」更准。"
         ))
 
-        // 响铃时长
+        // 响铃时长。项名放进灰色选择行里，不再单独占一行 label：
+        // 一个灰底块 + 上方一行孤立的标题，视觉上是两个块，反而更散
         ringMs = rule?.ringMs ?: 0L
-        root.addView(label("响铃时长"))
-        root.addView(buildRingRow())
+        root.addView(
+            buildRingRow(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(20) }
+        )
         root.addView(note(
-            "「单次提示」用系统通知音，响一遍就结束。10 秒以上由应用自己循环播放闹钟音，到点自动停。\n" +
-                "选「持续响铃」会一直响下去，直到点通知上的「停止响铃」、划掉那条通知，或者打开本应用 —— " +
-                "适合绝不能错过的那一类短信。"
+            "10 秒以上由应用循环播放闹钟音，到点自停；" +
+                "响铃期间点通知上的「停止响铃」或直接划掉通知，都能提前停。"
         ))
 
         // 测试区
-        root.addView(label("测试（粘贴一条短信试试）"))
+        root.addView(label("测试（粘贴短信试试）"))
         testInput = EditText(this).apply {
             hint = "粘贴短信原文"
-            textSize = 14f
             minLines = 2
+            applyInputStyle()
         }
         root.addView(testInput)
-        testResult = TextView(this).apply {
-            textSize = 13f
-            setLineSpacing(dp(2).toFloat(), 1f)
-            setPadding(0, dp(8), 0, dp(8))
-        }
+        testResult = formFeedback()
         root.addView(testResult)
 
         // 保存 / 删除
@@ -125,27 +122,21 @@ class ImportantRuleEditActivity : BaseActivity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(8), 0, 0)
         }
-        btnRow.addView(Button(this).apply {
-            text = "保存"
+        btnRow.addView(actionButton("保存") { save() }.apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            pressScale(0.97f)
-            setOnClickListener { save() }
         })
         if (rule != null) {
-            btnRow.addView(Button(this).apply {
-                text = "删除"
+            btnRow.addView(actionButton("删除", danger = true) {
+                AlertDialog.Builder(this@ImportantRuleEditActivity)
+                    .setTitle("删除规则")
+                    .setMessage("删除这条规则及其全部记录？")
+                    .setPositiveButton("删除") { _, _ ->
+                        ImportantStore.remove(ruleId); finish()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }.apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                pressScale(0.97f)
-                setOnClickListener {
-                    AlertDialog.Builder(this@ImportantRuleEditActivity)
-                        .setTitle("删除规则")
-                        .setMessage("删除这条规则及其全部记录？")
-                        .setPositiveButton("删除") { _, _ ->
-                            ImportantStore.remove(ruleId); finish()
-                        }
-                        .setNegativeButton("取消", null)
-                        .show()
-                }
             })
         }
         root.addView(btnRow)
@@ -182,26 +173,25 @@ class ImportantRuleEditActivity : BaseActivity() {
     /** 边输入边给反馈：几段文字 + 这条测试短信会不会命中 */
     private fun updatePreview() {
         val rule = currentRule()
-        keywordCount.text = "共 ${rule.keywords.size} 段匹配文字"
-        keywordCount.setTextColor(if (rule.keywords.isEmpty()) gray else blue)
+        keywordCount.setRowMeta(
+            "共 ${rule.keywords.size} 段匹配文字",
+            color = if (rule.keywords.isEmpty()) AppColor.muted else AppColor.blue
+        )
 
         val sample = testInput.text.toString()
         if (sample.isBlank()) {
-            testResult.text = ""
+            testResult.setFeedback("")
             return
         }
         if (rule.keywords.isEmpty()) {
-            testResult.text = "✘ 还没填匹配文字"
-            testResult.setTextColor(red)
+            testResult.setFeedback("✘ 还没填匹配文字", ok = false)
             return
         }
         val missing = rule.keywords.filterNot { sample.contains(it, ignoreCase = true) }
         if (missing.isEmpty()) {
-            testResult.text = "✔ 命中：${rule.keywords.size} 段文字全部包含"
-            testResult.setTextColor(green)
+            testResult.setFeedback("✔ 命中：${rule.keywords.size} 段文字全部包含", ok = true)
         } else {
-            testResult.text = "✘ 未命中：缺少「${missing.joinToString("」「")}」"
-            testResult.setTextColor(red)
+            testResult.setFeedback("✘ 未命中：缺少「${missing.joinToString("」「")}」", ok = false)
         }
     }
 
@@ -220,36 +210,17 @@ class ImportantRuleEditActivity : BaseActivity() {
      * 「响铃时长」设置行。
      *
      * 用「一整行可点 + 右侧显示当前值」，而不是把 6 个选项铺成一排按钮：
-     * 中文选项从「单次提示」到「持续响铃，手动停止」宽度差很大，等分排会挤成两行、
+     * 中文选项从「单次提示」到「无限」宽度差很大，等分排会挤成两行、
      * 长的那几个还会被截断。点开单选列表，一眼看全，也不用担心窄屏。
+     *
+     * 项名就在行内左侧（「响铃时长」），行上方不再放 label ——
+     * 同一件事写两遍会让人以为下面那行是另一个设置。
      */
     private fun buildRingRow(): View {
-        ringValue = TextView(this).apply {
-            text = RingMode.of(ringMs).label
-            textSize = 15f
-            setTextColor(blue)
-        }
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(14), dp(12), dp(14))
-            setBackgroundColor(0xFFF7F7F9.toInt())
-            isClickable = true
-            isFocusable = true
-            addView(TextView(this@ImportantRuleEditActivity).apply {
-                text = "收到后响多久"
-                textSize = 15f
-                setTextColor(Color.BLACK)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            addView(ringValue)
-            addView(TextView(this@ImportantRuleEditActivity).apply {
-                text = "  ›"
-                textSize = 15f
-                setTextColor(gray)
-            })
-            setOnClickListener { pickRing() }
-        }
+        // 结构由 choiceRow 定死：标题 + 当前值 + 箭头，值在第 2 个子 View
+        val row = choiceRow("响铃时长", RingMode.of(ringMs).label) { pickRing() }
+        ringValue = row.getChildAt(1) as TextView
+        return row
     }
 
     private fun pickRing() {

@@ -3,17 +3,17 @@ package phoenix.smsnotify.settings
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Build
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
-import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.divider
+import phoenix.smsnotify.ui.footNote
 import phoenix.smsnotify.ui.rowRipple
+import phoenix.smsnotify.ui.setRowSub
+import phoenix.smsnotify.ui.setRowTitle
 
 /**
  * 「设置」这一屏（底部导航第三栏）。
@@ -26,8 +26,6 @@ import phoenix.smsnotify.ui.rowRipple
  * 就近放在对应功能的标题栏 —— 设置页保持"只有全局项"。
  */
 class SettingsPageView(private val act: BaseActivity) : LinearLayout(act) {
-
-    private val gray = AppColor.hint
 
     init {
         orientation = VERTICAL
@@ -46,13 +44,7 @@ class SettingsPageView(private val act: BaseActivity) : LinearLayout(act) {
 
         // 底部版本水印：占满剩余高度，让它在最下面
         addView(View(act), LinearLayout.LayoutParams(0, 0, 1f))
-        addView(TextView(act).apply {
-            text = "短信提醒助手  v${AppInfo.versionName(act)}"
-            textSize = 12f
-            setTextColor(gray)
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, act.dp(8), 0, act.dp(4))
-        })
+        addView(act.footNote("短信提醒助手  v${AppInfo.versionName(act)}", topDp = 8))
     }
 
     /** 一条设置项：粗标题 + 灰色副标题，整行可点、带水波纹 */
@@ -65,16 +57,9 @@ class SettingsPageView(private val act: BaseActivity) : LinearLayout(act) {
             rowRipple(cornerDp = 8)
             setOnClickListener { onClick() }
 
+            addView(TextView(act).apply { setRowTitle(title) })
             addView(TextView(act).apply {
-                text = title
-                textSize = 17f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(Color.BLACK)
-            })
-            addView(TextView(act).apply {
-                text = subtitle
-                textSize = 13f
-                setTextColor(gray)
+                setRowSub(subtitle)
                 setPadding(0, act.dp(2), 0, 0)
             })
         }

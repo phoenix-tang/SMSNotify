@@ -2,32 +2,33 @@ package phoenix.smsnotify.delivery
 
 import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.text.Editable
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.TextWatcher
-import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
-import android.text.style.StyleSpan
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
-import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
-import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.ToggleView
+import phoenix.smsnotify.ui.actionButton
+import phoenix.smsnotify.ui.applyInputStyle
+import phoenix.smsnotify.ui.formFeedback
 import phoenix.smsnotify.ui.label
 import phoenix.smsnotify.ui.note
-import phoenix.smsnotify.ui.pressScale
+import phoenix.smsnotify.ui.pageHint
 import phoenix.smsnotify.ui.ruleRow
+import phoenix.smsnotify.ui.setFeedback
+import phoenix.smsnotify.ui.setRowSub
+import phoenix.smsnotify.ui.setRowTitle
+import phoenix.smsnotify.ui.splicerTag
 
 /**
  * 规则相关的两个页面：
@@ -46,9 +47,6 @@ class RulesActivity : BaseActivity() {
 
     private lateinit var adapter: RuleAdapter
 
-    /** 说明文字 / 停用态的灰，统一取全局配色 */
-    private val gray = AppColor.muted
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         RuleStore.init(this)
@@ -57,13 +55,9 @@ class RulesActivity : BaseActivity() {
         val root = pageRoot()
 
         root.addView(pageTitle("关键字提取规则"))
-        root.addView(TextView(this).apply {
-            text = "从上到下依次匹配，前面的规则命中后就不再往下看。" +
-                "预设规则排在前面并随应用更新，只能停用；自己添加的规则排在后面，不会被更新改动。"
-            textSize = 13f
-            setTextColor(gray)
-            setPadding(0, 8, 0, 8)
-        })
+        root.addView(pageHint(
+            "从上到下匹配，前面的命中后就不再往下看。带「预设」的随应用更新、只能停用，长按可删除自建规则。"
+        ))
 
         adapter = RuleAdapter()
         val list = ListView(this).apply { dividerHeight = 2 }
@@ -72,15 +66,10 @@ class RulesActivity : BaseActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
         ))
 
-        root.addView(Button(this).apply {
-            text = "＋ 添加规则"
-            pressScale(0.97f)
-            setOnClickListener {
-                startActivity(Intent(this@RulesActivity, RuleEditActivity::class.java)
-                    .putExtra("id", -1L))
-            }
+        root.addView(actionButton("＋ 添加规则") {
+            startActivity(Intent(this@RulesActivity, RuleEditActivity::class.java)
+                .putExtra("id", -1L))
         })
-
         setContentView(root)
     }
 
@@ -105,31 +94,24 @@ class RulesActivity : BaseActivity() {
 
             // 名称；停用的整行变灰。列表里不显示序号——两种规则视觉一致，
             // 顺序的含义（先匹配的优先）由页面顶部的说明交代。
-            // 预设规则在名称后加一个小号「预设」标签：它只能停用、不能编辑或删除
+            // 预设规则在名称后加一个小号「预设」标签：它只能停用、不能编辑或删除。
+            // 标签只缩字号、不换颜色，标题始终走 setRowTitle 的同一档样式。
             val label = if (r.name.isEmpty()) "（未命名规则）" else r.name
-            line1.text = if (r.preset) {
-                val s = SpannableString("$label  预设")
-                s.setSpan(
-                    RelativeSizeSpan(0.72f), label.length + 2, s.length,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
-                s
-            } else {
-                label
-            }
-            line1.textSize = 17f
-            line1.setTextColor(
-                when {
-                    !r.enabled -> gray
-                    r.preset -> AppColor.blue
-                    else -> Color.BLACK
-                }
+            line1.setRowTitle(
+                if (r.preset) {
+                    SpannableString("$label  预设").apply {
+                        setSpan(
+                            RelativeSizeSpan(0.72f), label.length + 2, length,
+                            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                    }
+                } else {
+                    label
+                },
+                dimmed = !r.enabled
             )
-            line1.setTypeface(null, Typeface.BOLD)
 
-            line2.text = "柜架号: ${r.cabPrefix}[柜架号]${r.cabSuffix}　取件码: ${r.codePrefix}[取件码]${r.codeSuffix}"
-            line2.textSize = 13f
-            line2.setTextColor(gray)
+            line2.setRowSub("柜架号: ${r.cabPrefix}[柜架号]${r.cabSuffix}　取件码: ${r.codePrefix}[取件码]${r.codeSuffix}")
 
             // 开关：列表复用时直接落位，不播动画
             toggle.setChecked(r.enabled, animate = false)
@@ -182,11 +164,6 @@ class RuleEditActivity : BaseActivity() {
     /** 预设规则：参数只读，不显示保存/删除，但测试框照用 */
     private var readOnly = false
 
-    private val gray = AppColor.muted
-
-    /** 前后缀输入框里「前缀」「后缀」占位提示的字色：比标签灰再浅一档 */
-    private val hintGray = 0xFFBDBDBD.toInt()
-
     private lateinit var nameEdit: EditText
     private lateinit var cabPrefix: EditText
     private lateinit var cabSuffix: EditText
@@ -217,13 +194,11 @@ class RuleEditActivity : BaseActivity() {
         ))
 
         if (readOnly) {
-            root.addView(TextView(this).apply {
-                text = "预设规则随应用更新：参数只读，不能修改或删除，只能回列表用开关停用（自己添加的规则不受影响）。" +
-                    "下面可以粘贴短信试匹配。"
-                textSize = 13f
-                setTextColor(AppColor.blue)
-                setPadding(0, 4, 0, 4)
-            })
+            // 只读说明走 pageHint 的默认灰，和其他页面的导语同一档，不另上颜色
+            root.addView(pageHint(
+                "预设规则随应用更新，参数只读；可粘贴短信试匹配，回列表能停用。",
+                topDp = 4, bottomDp = 4
+            ))
         }
 
 
@@ -232,11 +207,12 @@ class RuleEditActivity : BaseActivity() {
         nameEdit = EditText(this).apply {
             hint = "如：菜鸟"
             setText(rule?.name ?: "")
+            applyInputStyle()
         }
         root.addView(nameEdit)
 
         // 第一行：【柜架号】拼接器
-        root.addView(label("柜架号提取（可选；只捕获数字，\"号柜\"这类文字填在后缀）"))
+        root.addView(label("柜架号提取（可选）"))
         root.addView(splicerRow("前缀", "后缀",
             rule?.cabPrefix ?: "", rule?.cabSuffix ?: "",
             "【柜架号】").also { cabRow ->
@@ -245,30 +221,27 @@ class RuleEditActivity : BaseActivity() {
         })
 
         // 第二行：【取件码】拼接器
-        root.addView(label("取件码提取（数字或数字-连字符，如 3-2-5016）"))
+        root.addView(label("取件码提取"))
         root.addView(splicerRow("前缀", "后缀",
             rule?.codePrefix ?: "", rule?.codeSuffix ?: "",
             "【取件码】").also { codeRow ->
             codePrefix = codeRow.getChildAt(0) as EditText
             codeSuffix = codeRow.getChildAt(2) as EditText
         })
-        // 「间隔」是代码里的固定行为，界面上看不见，所以在这里说明它到底放宽了什么
+        // 「间隔」是代码里的固定行为，界面上看不见，只在取件码下面说一次
         root.addView(note(
-            "注意：前缀和取件码之间允许 0~4 个其他字符，所以前缀填「取件码」就能匹配「取件码111111」「取件码为111111」「取件码： 111111」。\n" +
-            "柜架号那一侧没有这个间隔，必须紧贴前后缀。"
+            "取件码前缀后允许 0~4 个其他字符，如「取件码」也能匹配「取件码为111111」；柜架号必须紧贴前后缀。"
         ))
 
         // 测试区
-        root.addView(label("测试（粘贴一条真实短信试试）"))
+        root.addView(label("测试（粘贴短信试试）"))
         testInput = EditText(this).apply {
             hint = "粘贴短信原文"
             minLines = 2
+            applyInputStyle()
         }
         root.addView(testInput)
-        testResult = TextView(this).apply {
-            textSize = 14f
-            setPadding(0, 8, 0, 8)
-        }
+        testResult = formFeedback()
         root.addView(testResult)
 
         // 预设规则：参数框去掉输入能力（长按仍可复制），测试框不动，物尽其用
@@ -283,27 +256,21 @@ class RuleEditActivity : BaseActivity() {
         // 保存 / 删除：预设规则没有可保存的字段，也不给删除入口
         if (!readOnly) {
             val btnRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            btnRow.addView(Button(this).apply {
-                text = "保存"
+            btnRow.addView(actionButton("保存") { save() }.apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                pressScale(0.97f)
-                setOnClickListener { save() }
             })
             if (rule != null) {
-                btnRow.addView(Button(this).apply {
-                    text = "删除"
+                btnRow.addView(actionButton("删除", danger = true) {
+                    AlertDialog.Builder(this@RuleEditActivity)
+                        .setTitle("删除规则")
+                        .setMessage("确定删除该规则？")
+                        .setPositiveButton("删除") { _, _ ->
+                            RuleStore.remove(ruleId); finish()
+                        }
+                        .setNegativeButton("取消", null)
+                        .show()
+                }.apply {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    pressScale(0.97f)
-                    setOnClickListener {
-                        AlertDialog.Builder(this@RuleEditActivity)
-                            .setTitle("删除规则")
-                            .setMessage("确定删除该规则？")
-                            .setPositiveButton("删除") { _, _ ->
-                                RuleStore.remove(ruleId); finish()
-                            }
-                            .setNegativeButton("取消", null)
-                            .show()
-                    }
                 })
             }
             root.addView(btnRow)
@@ -337,27 +304,26 @@ class RuleEditActivity : BaseActivity() {
         val r = currentRule()
         val sample = testInput.text.toString()
         if (sample.isEmpty()) {
-            testResult.text = ""
+            testResult.setFeedback("")
             return
         }
 
         val m = RuleStore.matchOne(r, sample)
         if (m == null) {
-            testResult.text = "✘ 未匹配，请检查取件码前缀/后缀是否与短信原文一致" +
-                "（前缀后允许 0~4 个其他字符，再往后要是 3 位以上数字）"
-            testResult.setTextColor(0xFFC62828.toInt())
+            // 具体规则上面那条 note 已经交代过，这里只说「不一致」
+            testResult.setFeedback("✘ 未匹配：检查前缀/后缀是否与原文一致", ok = false)
             return
         }
 
         val cab = if (m.first.isEmpty()) "（未匹配到，可以没有）" else m.first
-        testResult.text = buildString {
+        val text = buildString {
             append("✔ 匹配成功　柜架号: ").append(cab).append("　取件码: ").append(m.second)
             // 柜架号前后缀都为空时，柜号退化成"取第一个数字"，容易抓到错误的数字，这里提醒一句
             if (r.cabPrefix.isEmpty() && r.cabSuffix.isEmpty()) {
                 append("\n⚠ 柜架号前后缀都是空的，会取到短信里第一个数字，建议至少填一个")
             }
         }
-        testResult.setTextColor(0xFF2E7D32.toInt())
+        testResult.setFeedback(text, ok = true)
     }
 
     private fun save() {
@@ -381,34 +347,19 @@ class RuleEditActivity : BaseActivity() {
         leftValue: String, rightValue: String,
         centerLabel: String
     ): LinearLayout {
+        // 空着时只看得到提示语：浅灰白、不加粗，明确是「占位说明」；
+        // 一旦填了内容就是黑色加粗，填没填一眼就能分辨（规格在 applyInputStyle）
         fun field(hint: String, value: String): EditText = EditText(this).apply {
-            // 空着时只看得到提示语：浅灰白、不加粗，明确是「占位说明」；
-            // 一旦填了内容就是黑色加粗，填没填一眼就能分辨
-            setHint(SpannableString(hint).apply {
-                setSpan(
-                    ForegroundColorSpan(hintGray), 0, length,
-                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
-                setSpan(StyleSpan(Typeface.NORMAL), 0, length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-            })
-            setHintTextColor(hintGray)
+            this.hint = hint
             setText(value)
-            textSize = 14f
-            setTextColor(Color.BLACK)
-            setTypeface(null, Typeface.BOLD)
+            applyInputStyle(bold = true)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             addView(field(leftHint, leftValue))
-            addView(TextView(this@RuleEditActivity).apply {
-                text = centerLabel
-                textSize = 16f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(AppColor.blue)
-                setPadding(12, 0, 12, 0)
-            })
+            addView(splicerTag(centerLabel))
             addView(field(rightHint, rightValue))
         }
     }
