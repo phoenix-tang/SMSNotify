@@ -11,6 +11,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import phoenix.smsnotify.important.ImportantNotify
 import phoenix.smsnotify.important.RingIsland
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.divider
@@ -34,6 +35,9 @@ class SettingsPageView(private val act: BaseActivity) : LinearLayout(act) {
     /** 「响铃胶囊」这一行。副标题要跟着权限状态变，所以留个引用按位置取第二个子 View */
     private lateinit var islandRow: LinearLayout
 
+    /** 「锁屏亮屏」这一行，同上 */
+    private lateinit var fullScreenRow: LinearLayout
+
     init {
         orientation = VERTICAL
         gravity = Gravity.TOP
@@ -41,6 +45,11 @@ class SettingsPageView(private val act: BaseActivity) : LinearLayout(act) {
         setPadding(act.dp(16), act.dp(8), act.dp(16), act.dp(8))
 
         addView(act.pageTitle("设置", withBack = false))
+
+        // 放在胶囊上面：「响铃时屏幕会不会亮」比「浮不浮胶囊」更影响用户能不能被叫醒
+        fullScreenRow = entry("锁屏亮屏", fullScreenSubtitle()) { openFullScreenSettings() }
+        addView(fullScreenRow)
+        addView(act.divider())
 
         islandRow = entry("响铃胶囊", islandSubtitle()) { openOverlaySettings() }
         addView(islandRow)
@@ -64,8 +73,43 @@ class SettingsPageView(private val act: BaseActivity) : LinearLayout(act) {
      * 权限状态没法监听（`SYSTEM_ALERT_WINDOW` 没有回调），只能每次回到前台重读一次。
      */
     fun refresh() {
-        if (!::islandRow.isInitialized) return
-        (islandRow.getChildAt(1) as? TextView)?.text = islandSubtitle()
+        if (::islandRow.isInitialized) {
+            (islandRow.getChildAt(1) as? TextView)?.text = islandSubtitle()
+        }
+        if (::fullScreenRow.isInitialized) {
+            (fullScreenRow.getChildAt(1) as? TextView)?.text = fullScreenSubtitle()
+        }
+    }
+
+    /**
+     * 「全屏通知」权限的副标题。
+     *
+     * Android 14 起普通应用默认拿不到这个权限，而它正是「息屏时点亮屏幕」的唯一开关。
+     * 没有它时现象特别容易被误判成 bug：铃声响了、屏幕不亮、通知栏里也有记录，一切"看着正常"。
+     * 所以这里必须把状态说清楚，而不是只留一个能点的条目。
+     */
+    private fun fullScreenSubtitle(): String = when {
+        Build.VERSION.SDK_INT < 34 -> "系统默认允许 · 息屏时点亮屏幕并显示大按钮"
+        ImportantNotify.canFullScreen(act) -> "已允许 · 息屏或锁屏时点亮屏幕，可直接按停"
+        else -> "未允许 · 点这里开启「全屏通知」，否则响铃时屏幕不会亮"
+    }
+
+    /**
+     * 打开本应用的「全屏通知」设置页（Android 14+ 才有这一页）。
+     * 老系统没有这个权限概念，退到应用详情页说明一下即可。
+     */
+    private fun openFullScreenSettings() {
+        val pkg = Uri.parse("package:${act.packageName}")
+        val intent = if (Build.VERSION.SDK_INT >= 34) {
+            Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pkg)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
+        }
+        try {
+            act.startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            act.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg))
+        }
     }
 
     private fun islandSubtitle(): String = if (RingIsland.canShow(act)) {

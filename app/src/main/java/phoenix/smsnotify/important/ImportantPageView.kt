@@ -6,7 +6,6 @@ import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
-import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -290,7 +289,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         latestHeader.setCardHeader("正在响铃", color = AppColor.redText)
         // 这一屏本来就叫「重要短信提醒」，前缀是给胶囊和通知用的，卡片里省掉
         latestCategory.setCardTitle(subject.title.removePrefix("重要短信 · "))
-        latestTime.setRowMeta(ringElapsed(subject.since), color = AppColor.redText)
+        latestTime.setRowMeta(subject.elapsedText(), color = AppColor.redText)
 
         latestRingBox.visibility = VISIBLE
         latestPreview.visibility = GONE   // 摘要由 ringExcerptBox 完整显示，别写两遍
@@ -312,11 +311,6 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         startRingTicker()
     }
 
-    private fun ringElapsed(since: Long): String {
-        val s = (SystemClock.elapsedRealtime() - since) / 1_000
-        return "已响 %02d:%02d".format(s / 60, s % 60)
-    }
-
     private fun startRingTicker() {
         if (ringTicker != null) return
         val t = object : Runnable {
@@ -327,7 +321,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
                     renderLatest()
                     return
                 }
-                latestTime.text = ringElapsed(subject.since)
+                latestTime.text = subject.elapsedText()
                 postDelayed(this, 1_000)
             }
         }

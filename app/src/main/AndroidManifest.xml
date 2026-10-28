@@ -11,6 +11,17 @@
     -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!--
+        息屏/锁屏时点亮屏幕并盖住锁屏（important/AlarmActivity）。
+
+        Android 14（API 34）起这不是「声明了就有效」的普通权限：默认只授予通话/闹钟类
+        应用，其余应用要被用户在「特殊权限 → 全屏通知」里手动打开，否则系统会静默忽略
+        通知上的全屏 intent（声音照响、屏幕不亮，也没有任何报错）。
+        代码里用 NotificationManager.canUseFullScreenIntent() 查询状态，
+        设置页给了跳转入口，见 ImportantNotify.canFullScreen。
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
     <!-- App 只做一件事：把各功能模块注册到短信分发中心 -->
     <application
         android:name=".App"
@@ -41,6 +52,24 @@
         <activity android:name=".important.ImportantRulesActivity" android:exported="false" />
         <activity android:name=".important.ImportantRuleEditActivity"
             android:windowSoftInputMode="adjustResize" android:exported="false" />
+
+        <!--
+            全屏提醒页：只在息屏/锁屏时由通知的全屏 intent 拉起，不对外暴露。
+
+            taskAffinity="" + excludeFromRecents：让它待在独立任务里，不混进主页那摞栈，
+            停止后 finish 直接回锁屏 —— 而不是把 MainActivity 顶到用户脸上。
+            showWhenLocked / turnScreenOn 是「锁屏上显示 + 点亮屏幕」的声明式写法，
+            AlarmActivity 里还有对应的代码设置（部分 ROM 只认其中一种）。
+        -->
+        <activity
+            android:name=".important.AlarmActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
 
         <!-- ===== 设置（settings 包）：底部导航第三栏里的子页 ===== -->
         <activity android:name=".settings.AboutActivity" android:exported="false" />

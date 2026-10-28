@@ -80,8 +80,27 @@ data class RingSubject(
     /** 命中规则的关键字，卡片渲染时用来标红（和记录行同一套 [highlightKeywords]） */
     val keywords: List<String>,
     /** 开始响的时刻，`SystemClock.elapsedRealtime()` */
-    val since: Long
-)
+    val since: Long,
+    /** 这一次设定的总时长，界面用它把「已响多久」和「总共该响多久」并排显示 */
+    val mode: RingMode
+) {
+    /**
+     * 「已响 00:09 / 共 01:00」，无限响铃写成「已响 00:09 / 无限」。
+     *
+     * 带上总时长是为了自测：光看「已响」说不清这次是 10 秒的规则还是 3 分钟的规则，
+     * 验完还得回去翻规则列表。放在 [RingSubject] 上是因为 App 里的响铃卡片和锁屏上的
+     * 全屏页显示的是同一件事，两处各写一遍必然有一天不一致。
+     */
+    fun elapsedText(now: Long = SystemClock.elapsedRealtime()): String {
+        val s = (now - since).coerceAtLeast(0) / 1_000
+        val elapsed = "%02d:%02d".format(s / 60, s % 60)
+        return if (mode == RingMode.FOREVER) {
+            "已响 $elapsed / 无限"
+        } else {
+            "已响 $elapsed / 共 %02d:%02d".format(mode.ms / 60_000, mode.ms / 1_000 % 60)
+        }
+    }
+}
 
 /**
  * 循环响铃。系统通知渠道只会响「一遍」且时长不可控，想响几十秒到几分钟只能自己放。
@@ -100,8 +119,10 @@ data class RingSubject(
  * 进程真被回收时胶囊会一起消失，但通知还在通知栏里，也有「停止响铃」按钮，
  * 所以任何一种死法都留着至少一条能让用户按到「停」的路。
  *
- * TODO(锁屏闹钟界面)：屏幕锁着时用 `USE_FULL_SCREEN_INTENT` + 全屏 Activity 盖住锁屏
- * （现在只有 [RingIsland] 的胶囊和通知，锁屏上按停仍要解锁）。
+ * 锁屏/息屏时的提醒交给 [AlarmActivity]：通知带 `setFullScreenIntent`，系统在屏幕关闭或
+ * 锁屏时把那一页拉起来、点亮屏幕，用户抬眼就能按停。它的前提是「全屏通知」权限
+ * （Android 14+ 普通应用默认关闭，见 [ImportantNotify.canFullScreen]）；没有权限时
+ * 全屏 intent 会被系统静默忽略，退化成「只有声音」—— 和加这个页面之前一样。
  */
 object AlarmRing {
 
@@ -191,7 +212,7 @@ object AlarmRing {
         ringtone = rt
         holdFocus(app)
         rt.play()
-        current = RingSubject(title, excerpt, keywords, SystemClock.elapsedRealtime())
+        current = RingSubject(title, excerpt, keywords, SystemClock.elapsedRealtime(), mode)
         Log.i(TAG, "start mode=${mode.name} ms=${mode.ms}")
 
         // 提醒落在哪：页面正显示着响铃卡片就不必再浮胶囊，否则胶囊浮上去正好压住页面标题栏。
@@ -218,10 +239,10 @@ object AlarmRing {
         timeout?.let { handler.removeCallbacks(it) }
         timeout = null
         ringtone?.let {
-            if (it.isPlaying) {
-                it.stop()
-                Log.i(TAG, "stop")
-            }
+            // 日志无条件打：`isPlaying` 在部分设备上并不可靠（刚播、被系统压掉都可能返回 false），
+            // 只在为 true 时打印会让"到底有没有执行到 stop"这件事无法从日志判断
+            Log.i(TAG, "stop playing=${it.isPlaying}")
+            if (it.isPlaying) it.stop()
         }
         ringtone = null
         releaseFocus()

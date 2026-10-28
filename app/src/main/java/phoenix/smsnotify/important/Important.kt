@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.Icon
+import android.os.Build
+import android.os.PowerManager
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
@@ -526,7 +528,24 @@ object ImportantNotify {
             keywords = rule.keywords
         )
 
-        val channelId = if (visible) ISLAND_CHANNEL.id else RING_CHANNEL.id
+        // 静默渠道只在「屏幕亮着、提醒已经在眼前」时用，目的是别让横幅压住胶囊。
+        // 屏幕灭着必须走 HIGH 渠道：IMPORTANCE_DEFAULT 的通知 SystemUI 根本不会
+        // 给它全屏提醒的机会 —— 表现就是「有声音、屏幕不亮」，而且没有任何报错。
+        // 这里不看 cardVisible 一个值：它可能因为页面没走到 onPause 而残留为 true，
+        // 那时候屏幕上其实什么都没有，再走静默渠道就等于既不亮屏也不弹横幅。
+        val screenOn = ctx.getSystemService(PowerManager::class.java)?.isInteractive ?: true
+        val channelId = if (visible && screenOn) ISLAND_CHANNEL.id else RING_CHANNEL.id
+
+        // 先撤掉上一条，再发新的。
+        //
+        // 系统只在通知**新增**（added）时评估全屏 intent（AOSP
+        // `NotificationInterruptStateProviderImpl.shouldLaunchFullScreenIntentWhenAdded`）。
+        // 同一个 id 直接 notify 会被当成"更新"，于是第一条短信能亮屏，后面几条就只剩声音。
+        // 撤掉再发，等于告诉系统「这是一条全新的提醒」，灯光和全屏页都会重新走一遍。
+        //
+        // 顺带收走孤儿通知：进程被系统回收时，stopRinging() 里那句 cancel 永远没有机会执行，
+        // 留下一条写着「响铃中」实际早就没声音的通知。下一条短信到达时正好把它清掉。
+        AppNotify.cancel(ctx, NOTIF_ID)
 
         AppNotify.post(ctx, channelId, NOTIF_ID) { b ->
             b.setSmallIcon(android.R.drawable.stat_notify_chat)
@@ -541,6 +560,10 @@ object ImportantNotify {
                 .setWhen(System.currentTimeMillis())
                 .setShowWhen(true)
                 .setContentIntent(AppNotify.openApp(ctx, MainActivity.TAB_IMPORTANT))
+                // 息屏/锁屏时交给系统把 [AlarmActivity] 拉起来并点亮屏幕 —— 没有这一句，
+                // 用户听到铃声抬头看，屏幕还是黑的。亮屏且解锁时系统不会用它，仍然只弹横幅；
+                // 没有「全屏通知」权限时会被静默忽略（见 [canFullScreen]）。
+                .setFullScreenIntent(alarmScreen(ctx), true)
 
             // 铃声到点自停时通知跟着消失：留一条"响铃中"却没有声音的通知只会让人困惑
             mode.ms.takeIf { it > 0 }?.let { b.setTimeoutAfter(it) }
@@ -548,7 +571,7 @@ object ImportantNotify {
             // 读出「响铃中 · 不会自动停」才知道要点按钮
             b.setSubText(
                 if (mode == RingMode.FOREVER) "响铃中 · 不会自动停"
-                else "响铃中 · ${mode.label}"
+                else "响铃中 · 共 ${mode.label}"
             )
             b.addAction(
                 Notification.Action.Builder(
@@ -569,6 +592,39 @@ object ImportantNotify {
             Intent(ctx, StopRingReceiver::class.java).setAction(ACTION_STOP_RING),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+    /**
+     * 全屏提醒页的入口，交给 [Notification.Builder.setFullScreenIntent]。
+     *
+     * requestCode 固定 12：同一个 PendingIntent 反复复用，不需要每次都新建。
+     */
+    private fun alarmScreen(ctx: Context): PendingIntent =
+        PendingIntent.getActivity(
+            ctx, 12,
+            Intent(ctx, AlarmActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+    /**
+     * 系统是否允许本应用弹「全屏提醒」。这是锁屏/息屏亮屏的**唯一前提**。
+     *
+     * Android 14（API 34）起，`USE_FULL_SCREEN_INTENT` 只默认授予通话/闹钟类应用，
+     * 其余应用即使 manifest 里声明了，系统也会把全屏 intent 静默降级成一条普通通知 ——
+     * 表现正是「有声音、屏幕不亮」，而且没有任何报错。所以设置页要能显示这个状态并跳转授权，
+     * 否则用户只会以为是 App 坏了。
+     *
+     * API 33 及以下没有这个限制，一律返回 true。
+     */
+    fun canFullScreen(ctx: Context): Boolean = try {
+        if (Build.VERSION.SDK_INT >= 34) {
+            ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()
+        } else true
+    } catch (_: Exception) {
+        // 个别 ROM 没实现这个查询接口：按「允许」处理，让通知照常带全屏 intent
+        true
+    }
 }
 
 /**
