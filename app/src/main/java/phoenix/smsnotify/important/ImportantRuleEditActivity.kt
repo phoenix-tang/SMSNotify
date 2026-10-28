@@ -14,8 +14,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import phoenix.smsnotify.common.displayWidth
+import phoenix.smsnotify.ui.displayWidth
 import phoenix.smsnotify.ui.AppColor
+import phoenix.smsnotify.ui.AppIcons
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.actionButton
 import phoenix.smsnotify.ui.applyInputStyle
@@ -32,8 +33,10 @@ import phoenix.smsnotify.ui.setRowMeta
  * 表单只有两个字段，刻意保持极简 —— 这个模块的定位就是「我说几个词，你帮我盯着短信」，
  * 规则写正则或字段占位符都属于快递模块那套，不该搬到这里。
  *
- * 多段文字用**换行**分隔：一个 EditText 里一行一段，比「加一段 / 删一段」的按钮列表
- * 更好输入（可以直接从备忘录里粘贴一大段）。
+ * 多段文字是「一行一个输入框」：每行右侧带自己的长度计数，行尾有删除键，底部是「＋ 添加一段」。
+ * 之所以不给一个多行框逐行标长度 —— 一段文字长了会折行，计数就不知道该贴哪一行；
+ * 拆成一个框一段，段和计数才一一对应。从备忘录粘贴一大段照样能用：剪贴板里的换行
+ * 会被拆成多个框，而不是挤在同一段里。
  */
 class ImportantRuleEditActivity : BaseActivity() {
 
@@ -45,11 +48,22 @@ class ImportantRuleEditActivity : BaseActivity() {
 
     private lateinit var nameEdit: EditText
     private lateinit var nameCount: TextView
-    private lateinit var keywordEdit: EditText
-    private lateinit var keywordCount: TextView
+    private lateinit var keywordBox: LinearLayout
+    private lateinit var addKeywordButton: TextView
     private lateinit var testInput: EditText
     private lateinit var testResult: TextView
     private lateinit var ringValue: TextView
+
+    /** 匹配文字的每一段，和 [keywordBox] 里的子 View 一一对应、同序 */
+    private val keywordRows = mutableListOf<KeywordRow>()
+
+    /**
+     * 正在做「把粘贴进来的多行拆成多个输入框」，用来挡住拆分过程中连锁触发的 TextWatcher。
+     *
+     * 拆分时要对某个框 `setText`、还要新建框并 `setText`，这两步都会再进来一次；
+     * 没有这个开关会无限递归（新建框又触发拆分）。
+     */
+    private var splitting = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -93,28 +107,34 @@ class ImportantRuleEditActivity : BaseActivity() {
             ))
         })
 
-        // 匹配文字（多段）
-        root.addView(label("匹配文字（每行一段）"))
-        keywordEdit = EditText(this).apply {
-            hint = "余额\n到账\n消费"
-            setText(rule?.keywords?.joinToString("\n") ?: "")
-            gravity = Gravity.TOP or Gravity.START
-            minLines = 4
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setBackgroundColor(AppColor.field)
-            applyInputStyle()
+        // 匹配文字：一段一个输入框，每个框右侧带自己的长度计数。
+        //
+        // 原来是一个多行框、每行一段，但那样没法给「每一行」标长度 —— 一段文字长了会折行，
+        // 计数就不知道该贴哪一行，贴上去也会和下一段挤在一起。拆成一行一个框之后，
+        // 段和计数一一对应，删除也变成「删掉这一行」而不是删掉第几行文字。
+        root.addView(label("匹配文字"))
+        keywordBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(keywordBox)
+        addKeywordButton = TextView(this).apply {
+            text = "＋ 添加一段"
+            textSize = 14f
+            setTextColor(AppColor.blue)
+            setPadding(dp(2), dp(10), 0, dp(2))
+            setOnClickListener {
+                focusRow(addKeywordRow(hint = if (keywordRows.isEmpty()) "如：余额" else "如：到账"))
+            }
         }
-        root.addView(keywordEdit, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        ))
-        keywordCount = TextView(this).apply {
-            setRowMeta("")
-            setPadding(0, dp(6), 0, 0)
+        root.addView(addKeywordButton)
+
+        // 老数据可能超过 5 段（那时还没有上限），读进来只认前 5 段 ——
+        // 界面上只有 5 个框，存盘取的就是这 5 个框，不会出现「看着 5 行、存了 8 段」
+        val initial = rule?.keywords?.takeIf { it.isNotEmpty() } ?: listOf("")
+        initial.take(ImportantRule.KEYWORD_MAX_COUNT).forEachIndexed { i, kw ->
+            addKeywordRow(kw, hint = if (i == 0) "如：余额" else "如：到账")
         }
-        root.addView(keywordCount)
 
         root.addView(note(
-            "每行一段，不区分大小写；全部出现在同一条短信里才算命中。\n" +
+            "不区分大小写；全部出现在同一条短信里才算命中。\n" +
                 "写具体些：「尾号1234」比「余额」更准。"
         ))
 
@@ -175,22 +195,20 @@ class ImportantRuleEditActivity : BaseActivity() {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
         }
-        listOf(nameEdit, keywordEdit, testInput).forEach { it.addTextChangedListener(watcher) }
+        listOf(nameEdit, testInput).forEach { it.addTextChangedListener(watcher) }
         updatePreview()
     }
 
-    /** 一行一段；顺带把「中文逗号/顿号/分号」也当分隔符，从聊天记录里粘来的短句也能直接用 */
-    private fun keywordsOf(text: String): List<String> =
-        text.split('\n')
-            .flatMap { it.split('，', '、', '；') }
-            .map { it.trim() }
+    /** 每个框就是一段，空框直接跳过（用户点了「＋」又没填）。 */
+    private fun keywordsOf(): List<String> =
+        keywordRows.map { it.edit.text.toString().trim() }
             .filter { it.isNotEmpty() }
             .distinct()
 
     private fun currentRule(): ImportantRule = ImportantRule(
         id = ruleId,
         name = nameEdit.text.toString().trim(),
-        keywords = keywordsOf(keywordEdit.text.toString()),
+        keywords = keywordsOf(),
         enabled = origin?.enabled ?: true,
         createdAt = origin?.createdAt ?: System.currentTimeMillis(),
         ringMs = ringMs
@@ -199,12 +217,157 @@ class ImportantRuleEditActivity : BaseActivity() {
     /**
      * 第几段（从 1 起）超过了宽度上限；没超就返回空。
      *
-     * 提示和保存校验共用同一份判断，否则会出现「界面没红、保存却被拒」或反过来。
+     * 行内计数和保存校验共用同一份判断，否则会出现「界面没红、保存却被拒」或反过来。
      */
-    private fun overLongKeywords(keywords: List<String>): List<Int> =
-        keywords.withIndex()
-            .filter { displayWidth(it.value) > ImportantRule.KEYWORD_MAX_WIDTH }
-            .map { it.index + 1 }
+    private fun overLongKeywordIndexes(): List<Int> =
+        keywordRows.mapIndexedNotNull { i, row ->
+            if (displayWidth(row.edit.text.toString().trim()) > ImportantRule.KEYWORD_MAX_WIDTH) i + 1
+            else null
+        }
+
+    // ---------------- 匹配文字的那些行 ----------------
+
+    /**
+     * 加一行匹配文字。
+     *
+     * @param at 插到第几个位置；`-1` 表示追加到末尾（「＋ 添加一段」走这里）
+     */
+    private fun addKeywordRow(
+        text: String = "",
+        hint: String = "如：余额",
+        at: Int = -1
+    ): KeywordRow {
+        val edit = EditText(this).apply {
+            this.hint = hint
+            setText(text)
+            maxLines = 1
+            inputType = InputType.TYPE_CLASS_TEXT
+            setPadding(dp(12), dp(10), dp(12) + dp(COUNT_RESERVE_DP), dp(10))
+            setBackgroundColor(AppColor.field)
+            applyInputStyle()
+        }
+        val count = TextView(this).apply {
+            setRowMeta("")
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setPadding(0, 0, dp(12), 0)
+        }
+        val field = FrameLayout(this).apply {
+            addView(edit, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(count, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END
+            ))
+        }
+        val del = iconButton(AppIcons.close()) {}.apply { iconColor = AppColor.muted }
+
+        val view = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(field, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(del)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
+        }
+        val row = KeywordRow(view, edit, count, del)
+        del.setOnClickListener { removeKeywordRow(row) }
+
+        edit.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                if (splitting) return
+                val typed = s?.toString().orEmpty()
+                if (typed.contains('\n')) splitKeywordRow(row, typed) else updatePreview()
+            }
+
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
+
+        val insertAt = if (at < 0) keywordRows.size else at.coerceIn(0, keywordRows.size)
+        keywordBox.addView(view, insertAt)
+        keywordRows.add(insertAt, row)
+        refreshKeywordRows()
+        // 新行要立刻显示自己的「0 / 24」，不能等下一次输入才出现
+        updateRowCount(row)
+        return row
+    }
+
+    /**
+     * 粘贴进来的内容里有换行：当前框留第一段，其余按顺序拆成新行插在它后面。
+     *
+     * 这是为了保住「从备忘录粘一大段」的用法 —— 拆成一行一个框之后，如果直接把换行
+     * 吞掉或换成空格，粘进来的三段会挤在同一段里，匹配不到任何东西。
+     * 已有的行不动，只在中间插入，用户原有的内容不会被覆盖。
+     */
+    private fun splitKeywordRow(row: KeywordRow, text: String) {
+        val parts = text.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+        val index = keywordRows.indexOf(row)
+        if (index < 0) return
+
+        // 拆分同样受段数上限约束：放不下的行并进当前这一段（空格隔开），而不是悄悄丢掉。
+        // 合并会让这一段的计数变红，用户能看出来还有内容被挤在这里。
+        val room = (ImportantRule.KEYWORD_MAX_COUNT - keywordRows.size).coerceAtLeast(0)
+        val extra = parts.drop(1)
+        val inserted = extra.take(room)
+        val merged = (parts.take(1) + extra.drop(room)).joinToString(" ").trim()
+
+        splitting = true
+        try {
+            row.edit.setText(merged)
+            inserted.forEachIndexed { offset, part ->
+                addKeywordRow(part, hint = "如：到账", at = index + 1 + offset)
+            }
+        } finally {
+            splitting = false
+        }
+        updatePreview()
+    }
+
+    private fun removeKeywordRow(row: KeywordRow) {
+        // 只剩一行时不去掉它：那一行是唯一的输入位，清空比删掉更自然
+        if (keywordRows.size <= 1) {
+            row.edit.setText("")
+            return
+        }
+        keywordRows.remove(row)
+        keywordBox.removeView(row.view)
+        refreshKeywordRows()
+        updatePreview()
+    }
+
+    /**
+     * 同步「删除键」和「＋ 添加一段」的可用状态。
+     *
+     * 只剩一段时删除键用 GONE（不是 INVISIBLE）：那一行没有可删的东西，留一个空位
+     * 会让输入框比上面的「规则名称」窄一截。加第二行时框会收窄 34dp —— 那是「多出
+     * 一个删除键」的自然结果，和「多了一行」同时发生，不会显得突然。
+     */
+    private fun refreshKeywordRows() {
+        val showDelete = keywordRows.size > 1
+        keywordRows.forEach {
+            it.delete.visibility = if (showDelete) View.VISIBLE else View.GONE
+        }
+
+        val full = keywordRows.size >= ImportantRule.KEYWORD_MAX_COUNT
+        addKeywordButton.text =
+            if (full) "最多 ${ImportantRule.KEYWORD_MAX_COUNT} 段" else "＋ 添加一段"
+        addKeywordButton.setTextColor(if (full) AppColor.muted else AppColor.blue)
+        addKeywordButton.isEnabled = !full
+    }
+
+    private fun focusRow(row: KeywordRow) {
+        row.edit.requestFocus()
+        row.edit.setSelection(row.edit.text.length)
+    }
+
+    private fun updateRowCount(row: KeywordRow) {
+        val width = displayWidth(row.edit.text.toString().trim())
+        row.count.setRowMeta(
+            "$width / ${ImportantRule.KEYWORD_MAX_WIDTH}",
+            color = if (width > ImportantRule.KEYWORD_MAX_WIDTH) AppColor.redText else AppColor.muted
+        )
+    }
 
     /** 边输入边给反馈：长度有没有超、几段文字 + 这条测试短信会不会命中 */
     private fun updatePreview() {
@@ -219,20 +382,8 @@ class ImportantRuleEditActivity : BaseActivity() {
             color = if (nameWidth > ImportantRule.NAME_MAX_WIDTH) AppColor.redText else AppColor.muted
         )
 
-        val overLong = overLongKeywords(rule.keywords)
-        keywordCount.setRowMeta(
-            when {
-                overLong.isNotEmpty() ->
-                    "第 ${overLong.joinToString("、")} 段太长（每段最多 ${ImportantRule.KEYWORD_MAX_WIDTH}，1 个汉字算 2）"
-                rule.keywords.isEmpty() -> "共 0 段匹配文字"
-                else -> "共 ${rule.keywords.size} 段匹配文字"
-            },
-            color = when {
-                overLong.isNotEmpty() -> AppColor.redText
-                rule.keywords.isEmpty() -> AppColor.muted
-                else -> AppColor.blue
-            }
-        )
+        // 每一段自己带计数，这里统一刷一遍：删行、拆分、粘贴之后都要重算
+        keywordRows.forEach { updateRowCount(it) }
 
         val sample = testInput.text.toString()
         if (sample.isBlank()) {
@@ -265,7 +416,7 @@ class ImportantRuleEditActivity : BaseActivity() {
             ).show()
             return
         }
-        val overLong = overLongKeywords(rule.keywords)
+        val overLong = overLongKeywordIndexes()
         if (overLong.isNotEmpty()) {
             Toast.makeText(
                 this,
@@ -336,6 +487,14 @@ class ImportantRuleEditActivity : BaseActivity() {
             .setNegativeButton("取消", null)
             .show()
     }
+
+    /** 一行匹配文字：输入框 + 行内计数 + 删除键 */
+    private class KeywordRow(
+        val view: View,
+        val edit: EditText,
+        val count: TextView,
+        val delete: View
+    )
 }
 
 /** 各种换行写法（`\r\n`、单独的 `\r`）都归一成一个空格 */
