@@ -3,11 +3,14 @@ package phoenix.smsnotify.important
 import android.app.AlertDialog
 import android.os.Bundle
 import android.text.Editable
+import android.text.InputFilter
+import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -59,20 +62,36 @@ class ImportantRuleEditActivity : BaseActivity() {
         val root = pageRoot()
         root.addView(pageTitle(if (rule == null) "添加规则" else "编辑规则"))
 
-        // 规则名称
+        // 规则名称。计数叠在输入框右端而不是另起一行 —— 名字只有一行，
+        // 下方再挂一行小字会让这一块比「匹配文字」那块还高，版面上很跳
         root.addView(label("规则名称"))
         nameEdit = EditText(this).apply {
-            hint = "如：银行动账（留空则用第一段文字代替）"
-            setText(rule?.name ?: "")
+            // hint 缩短了：右侧 52dp 被计数占掉，原来那句「留空则用第一段文字代替」
+            // 会被截成省略号，改成同一句话的短版
+            hint = "如：银行动账（留空用第一段）"
+            setText(rule?.name?.replace(LINE_BREAK, " ") ?: "")
             maxLines = 1
+            // 单行输入：键盘右下角是「完成」而不是换行键。
+            // maxLines=1 只挡回车，粘贴多行文本照样能把换行塞进来，所以还要 [noLineBreak]
+            inputType = InputType.TYPE_CLASS_TEXT
+            filters = arrayOf(noLineBreak)
             applyInputStyle()
+            // 右侧给计数留出固定位置，否则文字会钻到「6 / 24」底下
+            setPadding(paddingLeft, paddingTop, paddingRight + dp(COUNT_RESERVE_DP), paddingBottom)
         }
-        root.addView(nameEdit)
         nameCount = TextView(this).apply {
             setRowMeta("")
-            setPadding(0, dp(6), 0, 0)
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setPadding(0, 0, dp(12), 0)
         }
-        root.addView(nameCount)
+        root.addView(FrameLayout(this).apply {
+            addView(nameEdit, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            addView(nameCount, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END
+            ))
+        })
 
         // 匹配文字（多段）
         root.addView(label("匹配文字（每行一段）"))
@@ -192,13 +211,12 @@ class ImportantRuleEditActivity : BaseActivity() {
         val rule = currentRule()
 
         // 计数按半角宽度走（1 个汉字 = 2）：直接数 `length` 会让「iiiiiiiiiiii」
-        // 和「银行到账提醒」看起来一样长，但其实前者只占一半宽
+        // 和「银行到账提醒」看起来一样长，但其实前者只占一半宽。
+        // 超限时只把数字变红（`26 / 24` 本身就说清了），不在框里塞整句提示 —— 那行放不下
         val nameWidth = displayWidth(rule.name)
-        val nameOver = nameWidth > ImportantRule.NAME_MAX_WIDTH
         nameCount.setRowMeta(
-            if (nameOver) "已超出（最多 ${ImportantRule.NAME_MAX_WIDTH}，1 个汉字算 2）"
-            else "$nameWidth / ${ImportantRule.NAME_MAX_WIDTH}",
-            color = if (nameOver) AppColor.redText else AppColor.muted
+            "$nameWidth / ${ImportantRule.NAME_MAX_WIDTH}",
+            color = if (nameWidth > ImportantRule.NAME_MAX_WIDTH) AppColor.redText else AppColor.muted
         )
 
         val overLong = overLongKeywords(rule.keywords)
@@ -292,6 +310,20 @@ class ImportantRuleEditActivity : BaseActivity() {
         return row
     }
 
+    /**
+     * 单行字段的过滤器：把换行换成空格。
+     *
+     * `maxLines = 1` 只挡软键盘上的回车，粘贴多行文字照样能把 `\n` 塞进来 —— 名字里带换行时，
+     * 胶囊、卡片标题、通知标题（只取第一行）都会显示成被截断的样子。
+     * 换成空格而不是直接删：「招商银行\n工资到账」删掉换行会连成「招商银行工资到账」，
+     * 两段粘成一串；空格才符合它原本的意思。
+     */
+    private val noLineBreak = InputFilter { src, start, end, _, _, _ ->
+        val typed = src.subSequence(start, end).toString()
+        if (!typed.contains('\n') && !typed.contains('\r')) null
+        else typed.replace(LINE_BREAK, " ")
+    }
+
     private fun pickRing() {
         val modes = RingMode.entries
         AlertDialog.Builder(this)
@@ -305,3 +337,15 @@ class ImportantRuleEditActivity : BaseActivity() {
             .show()
     }
 }
+
+/** 各种换行写法（`\r\n`、单独的 `\r`）都归一成一个空格 */
+private val LINE_BREAK = Regex("[\\r\\n]+")
+
+/**
+ * 输入框右侧给「6 / 24」留的宽度（dp）。
+ *
+ * 计数是叠在输入框上的，必须把输入框的右内边距推开这么多，否则打字到末尾时
+ * 文字会钻到计数底下。按 12sp 的 `00 / 24` 再加两侧留白估的，不算精确 ——
+ * 它只影响「文字最远能到哪」，宽一点只是少几个字的可视范围。
+ */
+private const val COUNT_RESERVE_DP = 52
