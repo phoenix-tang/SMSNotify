@@ -63,7 +63,6 @@ class AboutActivity : BaseActivity() {
             "取件记录、规则、命中记录都以 JSON 存在应用私有目录里，卸载即删除。" +
                 "应用不联网，也不会把短信内容发到任何地方。"
         ))
-        root.addView(section("包名", "phoenix.smsnotify"))
 
         // 把内容顶上去，短页面不要在底部留一大片空白
         root.addView(android.view.View(this), LinearLayout.LayoutParams(0, 0, 1f))

@@ -116,7 +116,7 @@ class SettingsPageView(private val act: BaseActivity) : LinearLayout(act) {
         AlertDialog.Builder(act)
             .setTitle("检查更新")
             .setMessage(
-                "当前版本：${AppInfo.versionName(act)}（${AppInfo.versionCode(act)}）\n\n" +
+                "当前版本：${AppInfo.versionName(act)}\n\n" +
                     "更新服务还没接入，暂时需要手动安装新版本。接入后这里会显示有没有新版本。"
             )
             .setPositiveButton("知道了", null)
