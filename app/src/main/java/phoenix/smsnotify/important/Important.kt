@@ -57,16 +57,16 @@ data class ImportantRule(
 }
 
 /**
- * 一次命中：哪条规则、哪个号码、什么内容、什么时候。
+ * 一次命中：哪条规则、什么内容、什么时候。
  *
- * **不保存短信原文**，只保存入库时按规则关键字裁好的摘要 [excerpt]（多段时用 `\n` 分隔）。
- * 验证码、动账这类短信原文里全是敏感信息，而界面从来只显示关键字前后各 10 个字，
- * 留全文既没用又多一份泄露面；摘要也不会因为后来改了规则关键字而变样。
+ * **不保存短信原文，也不保存发件号码**，只保存入库时按规则关键字裁好的摘要 [excerpt]
+ * （多段时用 `\n` 分隔）。验证码、动账这类短信原文里全是敏感信息，而界面从来只显示
+ * 关键字前后各 10 个字，留全文既没用又多一份泄露面；号码同理 —— 界面上从来没显示过它，
+ * 存着只是白白多一份数据。摘要也不会因为后来改了规则关键字而变样。
  */
 data class ImportantHit(
     val id: Long,
     val ruleId: Long,
-    val sender: String,
     /** 已裁好的摘要：关键字前后各 10 字，最多两段，段间用 `\n` 分隔 */
     val excerpt: String,
     val time: Long,
@@ -90,10 +90,12 @@ object ImportantStore {
 
     /**
      * 单条规则最多保留多少条命中。
-     * 重要短信往往来得频繁（验证码、动账都可能每天都来），不设上限文件会无限长；
-     * 超出的按时间淘汰最旧的 —— 界面上本来也只关心近期的。
+     *
+     * 命中记录只回答"最近来过什么"，20 条正好一屏多一点，扫起来不累；再往前的
+     * 本来也没人翻。超出上限按时间淘汰最旧的 —— 顺带让整份 JSON 足够小，
+     * 每次变更全量重写那点开销可以忽略。
      */
-    private const val MAX_HITS_PER_RULE = 200
+    private const val MAX_HITS_PER_RULE = 20
 
     /** 同一条短信被重复投递时（长短信分片等）的去重窗口 */
     private const val DEDUPE_WINDOW_MS = 2000L
@@ -158,7 +160,6 @@ object ImportantStore {
                     ImportantHit(
                         id = id,
                         ruleId = ruleId,
-                        sender = o.optString("sender", ""),
                         excerpt = excerpt,
                         time = o.optLong("time", 0L),
                         // 老数据没有快照：补成"此刻这条规则的关键字"，也就是升级那一刻的条件。
@@ -192,7 +193,7 @@ object ImportantStore {
             hArr.put(
                 JSONObject()
                     .put("id", h.id).put("ruleId", h.ruleId)
-                    .put("sender", h.sender).put("excerpt", h.excerpt).put("time", h.time)
+                    .put("excerpt", h.excerpt).put("time", h.time)
                     .put("keywords", JSONArray(h.keywords))
             )
         }
@@ -285,7 +286,7 @@ object ImportantStore {
      * 去重比对的是摘要而不是原文：两条在 2 秒内到达、摘要相同的短信（长短信分片）
      * 本来就不该各记一条。摘要已经包含关键字前后各 10 字，正常的两条不同短信不会撞。
      */
-    fun addHit(rule: ImportantRule, sender: String, body: String): Boolean {
+    fun addHit(rule: ImportantRule, body: String): Boolean {
         val now = System.currentTimeMillis()
         val excerpt = smsExcerpt(body, rule.keywords)
         val dup = hits.any {
@@ -293,7 +294,7 @@ object ImportantStore {
         }
         if (dup) return false
 
-        hits.add(ImportantHit(nextHitId++, rule.id, sender, excerpt, now, rule.keywords))
+        hits.add(ImportantHit(nextHitId++, rule.id, excerpt, now, rule.keywords))
         // 超出上限按时间淘汰最旧的
         val ofRule = hits.filter { it.ruleId == rule.id }
         if (ofRule.size > MAX_HITS_PER_RULE) {
@@ -578,10 +579,12 @@ object ImportantNotify {
  */
 object ImportantSmsHandler : SmsHandler {
     override fun onSms(context: Context, sender: String, body: String) {
+        // sender（发件号码）刻意不入库：界面从来没显示过它，摘要也足够认出是哪条短信
+
         // 先 init：进程刚被拉起时规则还没从磁盘读出来，先匹配会拿到空列表而漏记
         ImportantStore.init(context)
         val rule = ImportantStore.match(body) ?: return
-        if (ImportantStore.addHit(rule, sender, body)) {
+        if (ImportantStore.addHit(rule, body)) {
             ImportantNotify.notifyHit(context, rule, body)
         }
     }

@@ -198,11 +198,11 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         }
         latestCard.addView(latestCategory)
 
-        // 平时也露一行摘要：刚收到一条短信时最想知道它说了什么，
+        // 平时也露一段摘要：刚收到一条短信时最想知道它说了什么，
         // 以前只有响铃的那一刻看得到，铃声一停就只剩规则名了
         latestPreview = act.paragraph("", topDp = 3).apply {
             visibility = GONE
-            maxLines = 1
+            maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
         }
         latestCard.addView(latestPreview)
@@ -269,13 +269,17 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
         } else {
             latestCategory.setCardTitle(latest.first.label)
             latestTime.text = TimeFmt.short(latest.second.time)
-            // 摘要只取第一行（多段时第二段是小字补充，最新栏里放不下也不必放）。
-            // 上色同样用记录自己的关键字快照，规则后来改过条件也不会标错
-            val line = latest.second.excerpt.split('\n').firstOrNull { it.isNotEmpty() }
-            if (line != null) {
-                latestPreview.text = highlightKeywords(
-                    line, latest.second.keywords.ifEmpty { latest.first.keywords }
-                )
+            // 摘要照记录原样显示（最多两行 = 最多两段，和展开那条记录看到的同一份内容）。
+            // 上色用记录自己的关键字快照，规则后来改过条件也不会标错
+            val marks = latest.second.keywords.ifEmpty { latest.first.keywords }
+            val lines = latest.second.excerpt.split('\n').filter { it.isNotEmpty() }.take(2)
+            if (lines.isNotEmpty()) {
+                val sb = android.text.SpannableStringBuilder()
+                lines.forEachIndexed { i, line ->
+                    if (i > 0) sb.append('\n')
+                    sb.append(highlightKeywords(line, marks))
+                }
+                latestPreview.text = sb
                 latestPreview.visibility = VISIBLE
             }
         }
