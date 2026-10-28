@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
@@ -41,7 +40,7 @@ import phoenix.smsnotify.ui.roundedBg
  * 响铃胶囊：屏幕未锁定时浮在顶部的一条，形如
  *
  *     ┌──────────────────────────────┐
- *     │ 🔔  重要短信 · 银行动账  00:12  ◉ │
+ *     │ 🔔  银行动账  00:12 / 01:00  ◉ │
  *     └──────────────────────────────┘
  *
  * **为什么不是全屏闹钟界面**：全屏只在「手机在口袋里、屏幕黑着」时有意义 ——
@@ -77,7 +76,6 @@ object RingIsland {
 
     private var clock: TextView? = null
     private var ticker: Runnable? = null
-    private var startedAt = 0L
 
     /** 有没有「显示在其他应用上层」权限。没有就只能在通知栏里提醒 */
     fun canShow(ctx: Context): Boolean = try {
@@ -89,7 +87,7 @@ object RingIsland {
     /**
      * 显示胶囊；已经在显示就先换掉内容。没权限时静默返回（通知那条已经发出去了）。
      *
-     * @param text 规则名，接在「重要短信 · 」后面
+     * @param text 规则名，用户给规则起的名字
      * @return 是否真的浮出来了。调用方（[AlarmRing.start]）拿它决定通知要不要弹横幅
      */
     fun show(ctx: Context, text: String): Boolean {
@@ -174,10 +172,13 @@ object RingIsland {
         }
     }
 
-    /** 每秒刷一次「已响多久」，让用户判断还要不要继续听 */
+    /**
+     * 每秒刷一次「已过 / 总共」，让用户判断还要不要继续听。
+     *
+     * 起点和总时长都从 [AlarmRing.current] 现读，不在这里自己记一份：换一条短信时胶囊会被
+     * 重建（[show] 先 hide 再挂），前后台切换也会重挂窗口，本地记的起点每挂一次就从 00:00 重算。
+     */
     private fun startClock() {
-        // 以铃声真正开始的时刻为准：前后台切换会重新挂胶囊，不能每次都从 00:00 重算
-        startedAt = AlarmRing.current?.since ?: SystemClock.elapsedRealtime()
         clock?.text = elapsed()
         val t = object : Runnable {
             override fun run() {
@@ -189,11 +190,13 @@ object RingIsland {
         handler.postDelayed(t, 1_000)
     }
 
-    /** 只按分:秒计，超过一小时就继续累加分钟（响这么久大概率是忘了停） */
-    private fun elapsed(): String {
-        val s = (SystemClock.elapsedRealtime() - startedAt) / 1_000
-        return "%02d:%02d".format(s / 60, s % 60)
-    }
+    /**
+     * 「00:12 / 01:00」。
+     *
+     * 正常情况下取不到 null —— [hide] 会先摘掉 ticker 和 clock，`current` 才被清空，
+     * 这里留 `orEmpty()` 只是不让「顺序被将来改动」变成一次崩溃。
+     */
+    private fun elapsed(): String = AlarmRing.current?.elapsedCompact().orEmpty()
 
     // ---------------- 视图 ----------------
 
@@ -204,7 +207,7 @@ object RingIsland {
             // 右侧只留 6dp：停止键本身有 30dp，再给内边距会让它离圆角太远
             setPadding(ctx.dpi(12), ctx.dpi(9), ctx.dpi(6), ctx.dpi(9))
             background = ctx.roundedBg(AppColor.island, 22)
-            contentDescription = "重要短信响铃中：$text，点一下打开查看"
+            contentDescription = "响铃中：$text，点一下打开查看"
             isClickable = true
             isFocusable = true
             pressScale(0.96f)
@@ -218,20 +221,23 @@ object RingIsland {
                 }
             })
 
-            // 规则名可能很长（用户自己起的），限制宽度让它省略，别把胶囊拉成一整条
+            // 规则名可能很长（用户自己起的），限制宽度让它省略，别把胶囊拉成一整条。
+            // 130dp 是给右侧时间让位：`00:12 / 30:00` 比原来的 `00:12` 宽出三倍
             addView(TextView(ctx).apply {
                 this.text = text
                 textSize = 13f
                 setTextColor(AppColor.islandText)
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
-                maxWidth = ctx.dpi(170)
+                maxWidth = ctx.dpi(130)
             })
 
             clock = TextView(ctx).apply {
                 textSize = 12f
                 setTextColor(AppColor.islandSub)
                 setPadding(ctx.dpi(8), 0, 0, 0)
+                // 「00:12 / 30:00」比原来的纯秒表宽，别让它在窄屏上折成两行
+                maxLines = 1
             }
             addView(clock)
 

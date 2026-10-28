@@ -70,6 +70,13 @@ class AlarmActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 进程被系统回收后，它可能凭「最近任务」或锁屏提醒把这一页重建出来，
+        // 而铃声早就没了 —— 照常画下去只是一个空白的深色页，不如直接收掉
+        val subject = AlarmRing.current ?: run {
+            finish()
+            return
+        }
+
         // 锁屏上显示 + 点亮屏幕。manifest 里也声明了同一对属性，这里再设一次是因为
         // 部分 ROM 只在代码设置时才生效（Activity#setShowWhenLocked 是官方推荐写法）
         setShowWhenLocked(true)
@@ -77,7 +84,7 @@ class AlarmActivity : BaseActivity() {
         // 响铃期间不自动熄屏：用户抬眼就要能看到「谁在响」和停止键
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        setContentView(buildUi())
+        setContentView(buildUi(subject))
         // 父类默认把状态栏图标设成深色（给白底页面用的），这一页是深色底，必须换回浅色
         window.insetsController?.setSystemBarsAppearance(
             0,
@@ -117,9 +124,8 @@ class AlarmActivity : BaseActivity() {
 
     // ---------------- 布局 ----------------
 
-    private fun buildUi(): View {
-        val subject = AlarmRing.current
-
+    /** 按 [subject] 画这一页。传值而不是在里面再读一次 [AlarmRing.current]，省得反复判空 */
+    private fun buildUi(subject: RingSubject): View {
         val root = FrameLayout(this).apply { setBackgroundColor(BG) }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -161,7 +167,7 @@ class AlarmActivity : BaseActivity() {
             )
         }
         nameView = TextView(this).apply {
-            text = ruleName(subject?.title)
+            text = subject.title
             textSize = 27f
             setTextColor(TITLE_TEXT)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -172,7 +178,7 @@ class AlarmActivity : BaseActivity() {
         middle.addView(nameView, wrap())
 
         excerptView = TextView(this).apply {
-            text = subject?.excerpt.orEmpty()
+            text = subject.excerpt
             textSize = 16f
             setTextColor(BODY_TEXT)
             gravity = Gravity.CENTER
@@ -228,7 +234,7 @@ class AlarmActivity : BaseActivity() {
     /** 只刷新文案，不重建视图（换短信时用） */
     private fun bindContent() {
         val subject = AlarmRing.current ?: return
-        nameView?.text = ruleName(subject.title)
+        nameView?.text = subject.title
         excerptView?.text = subject.excerpt
         clockView?.text = elapsed()
     }
@@ -237,15 +243,6 @@ class AlarmActivity : BaseActivity() {
         LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         )
-
-    /**
-     * `title` 形如「重要短信 · 银行动账」。顶部已经写了「重要短信提醒」，
-     * 这里只留规则名，避免同一句话在一屏里出现两遍。
-     */
-    private fun ruleName(title: String?): String {
-        val t = title.orEmpty()
-        return t.substringAfter("· ", t).ifBlank { "重要短信" }
-    }
 
     /**
      * 「已响 00:09 / 共 01:00」。总时长也写出来：半睡半醒时看一眼就知道这条还要响多久，

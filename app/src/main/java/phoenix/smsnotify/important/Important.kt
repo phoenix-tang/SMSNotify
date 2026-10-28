@@ -39,7 +39,7 @@ import java.io.File
  * @param keywords 匹配文字，每一段都出现在短信里才算命中（AND）
  * @param enabled  右侧开关，停用后不再记录（历史记录保留）
  * @param createdAt 添加时间，列表按它倒序（最新添加的在最上面）
- * @param ringMs   响铃时长，语义见 [RingMode]：>0 响这么多毫秒、-1 一直响到手动停
+ * @param ringMs   响铃时长（毫秒），取值见 [RingMode]
  */
 data class ImportantRule(
     val id: Long,
@@ -139,8 +139,8 @@ object ImportantStore {
                             .filter { it.isNotBlank() },
                         enabled = o.optBoolean("enabled", true),
                         createdAt = o.optLong("createdAt", 0L),
-                        // 认不出的存盘值（含已删除的「单次提示」= 0）一并归一成默认档，
-                        // 这样内存里的值一定是合法枚举，界面和列表摘要都不会算错
+                        // 认不出的存盘值（含已删除的「单次提示」= 0、「无限」= -1）一并归一成
+                        // 默认档，这样内存里的值一定是合法枚举，界面和列表摘要都不会算错
                         ringMs = RingMode.of(o.optLong("ringMs", RingMode.DEFAULT.ms)).ms
                     )
                 )
@@ -513,7 +513,6 @@ object ImportantNotify {
         ensureChannel(ctx)
 
         val mode = rule.ringMode
-        val title = "重要短信 · ${rule.label}"
 
         // 通知栏只有两行，摘要取「关键字 + 上下文」的第一行（两个关键字合并时也在这一行里），
         // 想看更多就展开通知。这里直接用纯文本摘要，彩色 span 在通知里不生效。
@@ -522,8 +521,10 @@ object ImportantNotify {
 
         // 先响铃、先立提醒：它到底看不看得见（胶囊浮出来了，或者 App 里的卡片正显示着），
         // 决定下面这条通知用哪条渠道。「为什么响」现在由提醒自己先说，比通知早十几毫秒，感知不到区别。
+        // 标题就用规则名本身：带上「重要短信 · 」前缀只会把规则名往右挤，通知栏一截断
+        // 先被切掉的恰好是用户最想看的那个名字。
         val visible = AlarmRing.start(
-            ctx, mode, title,
+            ctx, mode, rule.label,
             excerpt = smsExcerpt(body, rule.keywords),
             keywords = rule.keywords
         )
@@ -549,7 +550,7 @@ object ImportantNotify {
 
         AppNotify.post(ctx, channelId, NOTIF_ID) { b ->
             b.setSmallIcon(android.R.drawable.stat_notify_chat)
-                .setContentTitle(title)
+                .setContentTitle(rule.label)
                 .setContentText(summary)
                 // 摘要会被截断，展开后看全文
                 .setStyle(Notification.BigTextStyle().bigText(body))
@@ -566,13 +567,9 @@ object ImportantNotify {
                 .setFullScreenIntent(alarmScreen(ctx), true)
 
             // 铃声到点自停时通知跟着消失：留一条"响铃中"却没有声音的通知只会让人困惑
-            mode.ms.takeIf { it > 0 }?.let { b.setTimeoutAfter(it) }
-            // 副标题交代"还要响多久"：无限那条不写「响铃中 · 无限」，
-            // 读出「响铃中 · 不会自动停」才知道要点按钮
-            b.setSubText(
-                if (mode == RingMode.FOREVER) "响铃中 · 不会自动停"
-                else "响铃中 · 共 ${mode.label}"
-            )
+            b.setTimeoutAfter(mode.ms)
+            // 副标题交代"总共该响多久"，和胶囊、卡片上的「共 X」是同一个数
+            b.setSubText("响铃中 · 共 ${mode.label}")
             b.addAction(
                 Notification.Action.Builder(
                     Icon.createWithResource(ctx, android.R.drawable.ic_lock_silent_mode),

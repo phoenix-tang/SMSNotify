@@ -287,8 +287,7 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
     private fun renderRinging(subject: RingSubject) {
         latestCard.background = act.roundedBg(AppColor.redBg, 12)
         latestHeader.setCardHeader("正在响铃", color = AppColor.redText)
-        // 这一屏本来就叫「重要短信提醒」，前缀是给胶囊和通知用的，卡片里省掉
-        latestCategory.setCardTitle(subject.title.removePrefix("重要短信 · "))
+        latestCategory.setCardTitle(subject.title)
         latestTime.setRowMeta(subject.elapsedText(), color = AppColor.redText)
 
         latestRingBox.visibility = VISIBLE
@@ -381,12 +380,12 @@ class ImportantPageView(private val act: BaseActivity) : LinearLayout(act) {
             }
         }
 
-        // 非默认响铃时长给个小红标签：一眼能看出"这条会一直响"，不用点进去确认
+        // 非默认响铃时长给个小红标签：一眼能看出"这条会响得久"，不用点进去确认
         val ringTag = if (rule.ringMode != RingMode.DEFAULT) act.tagLabel(
             rule.ringMode.badge, AppColor.redText, AppColor.redBg
         ).apply {
             // 左右都留 8dp：左边和规则名分开，右边和「N 条」分开，
-            // 否则「无限响铃 2 条」会读成一句
+            // 否则「响 30 分钟 2 条」会读成一句
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
