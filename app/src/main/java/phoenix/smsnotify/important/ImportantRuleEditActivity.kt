@@ -11,6 +11,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import phoenix.smsnotify.common.displayWidth
 import phoenix.smsnotify.ui.AppColor
 import phoenix.smsnotify.ui.BaseActivity
 import phoenix.smsnotify.ui.actionButton
@@ -40,6 +41,7 @@ class ImportantRuleEditActivity : BaseActivity() {
     private var ringMs = RingMode.DEFAULT.ms
 
     private lateinit var nameEdit: EditText
+    private lateinit var nameCount: TextView
     private lateinit var keywordEdit: EditText
     private lateinit var keywordCount: TextView
     private lateinit var testInput: EditText
@@ -66,6 +68,11 @@ class ImportantRuleEditActivity : BaseActivity() {
             applyInputStyle()
         }
         root.addView(nameEdit)
+        nameCount = TextView(this).apply {
+            setRowMeta("")
+            setPadding(0, dp(6), 0, 0)
+        }
+        root.addView(nameCount)
 
         // 匹配文字（多段）
         root.addView(label("匹配文字（每行一段）"))
@@ -170,12 +177,43 @@ class ImportantRuleEditActivity : BaseActivity() {
         ringMs = ringMs
     )
 
-    /** 边输入边给反馈：几段文字 + 这条测试短信会不会命中 */
+    /**
+     * 第几段（从 1 起）超过了宽度上限；没超就返回空。
+     *
+     * 提示和保存校验共用同一份判断，否则会出现「界面没红、保存却被拒」或反过来。
+     */
+    private fun overLongKeywords(keywords: List<String>): List<Int> =
+        keywords.withIndex()
+            .filter { displayWidth(it.value) > ImportantRule.KEYWORD_MAX_WIDTH }
+            .map { it.index + 1 }
+
+    /** 边输入边给反馈：长度有没有超、几段文字 + 这条测试短信会不会命中 */
     private fun updatePreview() {
         val rule = currentRule()
+
+        // 计数按半角宽度走（1 个汉字 = 2）：直接数 `length` 会让「iiiiiiiiiiii」
+        // 和「银行到账提醒」看起来一样长，但其实前者只占一半宽
+        val nameWidth = displayWidth(rule.name)
+        val nameOver = nameWidth > ImportantRule.NAME_MAX_WIDTH
+        nameCount.setRowMeta(
+            if (nameOver) "已超出（最多 ${ImportantRule.NAME_MAX_WIDTH}，1 个汉字算 2）"
+            else "$nameWidth / ${ImportantRule.NAME_MAX_WIDTH}",
+            color = if (nameOver) AppColor.redText else AppColor.muted
+        )
+
+        val overLong = overLongKeywords(rule.keywords)
         keywordCount.setRowMeta(
-            "共 ${rule.keywords.size} 段匹配文字",
-            color = if (rule.keywords.isEmpty()) AppColor.muted else AppColor.blue
+            when {
+                overLong.isNotEmpty() ->
+                    "第 ${overLong.joinToString("、")} 段太长（每段最多 ${ImportantRule.KEYWORD_MAX_WIDTH}，1 个汉字算 2）"
+                rule.keywords.isEmpty() -> "共 0 段匹配文字"
+                else -> "共 ${rule.keywords.size} 段匹配文字"
+            },
+            color = when {
+                overLong.isNotEmpty() -> AppColor.redText
+                rule.keywords.isEmpty() -> AppColor.muted
+                else -> AppColor.blue
+            }
         )
 
         val sample = testInput.text.toString()
@@ -197,6 +235,28 @@ class ImportantRuleEditActivity : BaseActivity() {
 
     private fun save() {
         val rule = currentRule()
+
+        // 长度校验放在保存时（而不是输入时硬截断）：粘贴一大段文字进来，被无声切掉
+        // 比看到一行红字更难理解。这两条限制都只为「塞得进界面 / 真能命中」服务，
+        // 不是安全边界，所以给用户看清楚再让他自己改。
+        if (displayWidth(rule.name) > ImportantRule.NAME_MAX_WIDTH) {
+            Toast.makeText(
+                this,
+                "规则名太长：最多 ${ImportantRule.NAME_MAX_WIDTH / 2} 个汉字（字母数字算半个）",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        val overLong = overLongKeywords(rule.keywords)
+        if (overLong.isNotEmpty()) {
+            Toast.makeText(
+                this,
+                "第 ${overLong.first()} 段匹配文字太长：每段最多 ${ImportantRule.KEYWORD_MAX_WIDTH / 2} 个汉字",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
         if (rule.keywords.isEmpty()) {
             Toast.makeText(this, "请至少填一段匹配文字，否则这条规则匹配不到任何短信", Toast.LENGTH_LONG).show()
             return
