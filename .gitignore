@@ -35,7 +35,7 @@ Thumbs.db
 # 密钥库一旦泄露，任何人都能签出「你的」更新包覆盖用户安装
 *.jks
 *.keystore
-keystore.properties
+# keystore.properties
 signing.properties
 
 # ---------- 本地 AI 会话产物 ----------
